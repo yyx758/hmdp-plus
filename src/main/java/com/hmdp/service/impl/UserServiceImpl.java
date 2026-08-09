@@ -4,12 +4,18 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.bean.copier.CopyOptions;
 import cn.hutool.core.lang.UUID;
 import cn.hutool.core.util.RandomUtil;
+import cn.hutool.core.util.StrUtil;
+import cn.hutool.crypto.digest.BCrypt;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.dto.LoginFormDTO;
+import com.hmdp.dto.PasswordUpdateDTO;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
+import com.hmdp.dto.UserProfileUpdateDTO;
 import com.hmdp.entity.User;
+import com.hmdp.entity.UserInfo;
 import com.hmdp.mapper.UserMapper;
+import com.hmdp.service.IUserInfoService;
 import com.hmdp.service.IUserService;
 import com.hmdp.utils.RegexUtils;
 import com.hmdp.utils.UserHolder;
@@ -17,9 +23,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.connection.BitFieldSubCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
-import javax.servlet.http.HttpSession;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
@@ -45,8 +51,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     @Resource
     private StringRedisTemplate stringRedisTemplate;
 
+    @Resource
+    private IUserInfoService userInfoService;
+
     @Override
-    public Result sendCode(String phone, HttpSession session) {
+    public Result sendCode(String phone) {
         // 1.校验手机号
         if (RegexUtils.isPhoneInvalid(phone)) {
             // 2.如果不符合，返回错误信息
@@ -65,7 +74,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     }
 
     @Override
-    public Result login(LoginFormDTO loginForm, HttpSession session) {
+    public Result login(LoginFormDTO loginForm) {
         // 1.校验手机号
         String phone = loginForm.getPhone();
         if (RegexUtils.isPhoneInvalid(phone)) {
@@ -73,6 +82,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             return Result.fail("手机号格式错误！");
         }
         // 3.从redis获取验证码并校验
+        if (StrUtil.isNotBlank(loginForm.getPassword())) {
+            return loginWithPassword(phone, loginForm.getPassword());
+        }
         String cacheCode = stringRedisTemplate.opsForValue().get(LOGIN_CODE_KEY + phone);
         String code = loginForm.getCode();
         if (cacheCode == null || !cacheCode.equals(code)) {
@@ -89,23 +101,52 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             user = createUserWithPhone(phone);
         }
 
-        // 7.保存用户信息到 redis中
-        // 7.1.随机生成token，作为登录令牌
-        String token = UUID.randomUUID().toString(true);
-        // 7.2.将User对象转为HashMap存储
+        // 7.保存用户信息到 Redis 并返回登录令牌
+        return createLoginToken(user);
+    }
+
+    private Result loginWithPassword(String phone, String password) {
+        User user = query().eq("phone", phone).one();
+        if (user == null || StrUtil.isBlank(user.getPassword()) || !passwordMatches(password, user.getPassword())) {
+            return Result.fail("手机号或密码错误");
+        }
+
+        return createLoginToken(user);
+    }
+
+    private Result createLoginToken(User user) {
+        String userTokenKey = LOGIN_USER_INDEX_KEY + user.getId();
+        String oldToken = stringRedisTemplate.opsForValue().getAndDelete(userTokenKey);
+        if (StrUtil.isNotBlank(oldToken)) {
+            stringRedisTemplate.delete(LOGIN_USER_KEY + oldToken);
+            log.debug("旧用户Token已删除，userId={}，token={}", user.getId(), oldToken);
+        }
+
+        String newToken = UUID.randomUUID().toString(true);
+        stringRedisTemplate.opsForValue().set(
+                userTokenKey,
+                newToken,
+                LOGIN_USER_TTL,
+                TimeUnit.MINUTES
+        );
+
         UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
         Map<String, Object> userMap = BeanUtil.beanToMap(userDTO, new HashMap<>(),
                 CopyOptions.create()
                         .setIgnoreNullValue(true)
                         .setFieldValueEditor((fieldName, fieldValue) -> fieldValue.toString()));
-        // 7.3.存储
-        String tokenKey = LOGIN_USER_KEY + token;
+        String tokenKey = LOGIN_USER_KEY + newToken;
         stringRedisTemplate.opsForHash().putAll(tokenKey, userMap);
-        // 7.4.设置token有效期
         stringRedisTemplate.expire(tokenKey, LOGIN_USER_TTL, TimeUnit.MINUTES);
+        return Result.ok(newToken);
+    }
 
-        // 8.返回token
-        return Result.ok(token);
+    private boolean passwordMatches(String rawPassword, String encodedPassword) {
+        try {
+            return BCrypt.checkpw(rawPassword, encodedPassword);
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     @Override
@@ -164,6 +205,108 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             num >>>= 1;
         }
         return Result.ok(count);
+    }
+
+    @Override
+    @Transactional
+    public Result updateProfile(UserProfileUpdateDTO profile, String token) {
+        if (profile == null || StrUtil.isBlank(profile.getNickName())) {
+            return Result.fail("昵称不能为空");
+        }
+
+        String nickName = profile.getNickName().trim();
+        if (nickName.length() > 32) {
+            return Result.fail("昵称不能超过32个字符");
+        }
+        if (profile.getIcon() != null && profile.getIcon().length() > 255) {
+            return Result.fail("头像地址过长");
+        }
+        if (profile.getCity() != null && profile.getCity().length() > 64) {
+            return Result.fail("城市名称不能超过64个字符");
+        }
+        if (profile.getIntroduce() != null && profile.getIntroduce().length() > 128) {
+            return Result.fail("个人介绍不能超过128个字符");
+        }
+        if (profile.getBirthday() != null && profile.getBirthday().isAfter(java.time.LocalDate.now())) {
+            return Result.fail("生日不能晚于今天");
+        }
+
+        UserDTO currentUser = UserHolder.getUser();
+        Long userId = currentUser.getId();
+
+        User user = new User();
+        user.setId(userId);
+        user.setNickName(nickName);
+        user.setIcon(profile.getIcon());
+        if (!updateById(user)) {
+            return Result.fail("用户不存在");
+        }
+
+        UserInfo userInfo = userInfoService.getById(userId);
+        boolean newUserInfo = userInfo == null;
+        if (newUserInfo) {
+            userInfo = new UserInfo();
+            userInfo.setUserId(userId);
+        }
+        userInfo.setCity(profile.getCity());
+        userInfo.setIntroduce(profile.getIntroduce());
+        userInfo.setGender(profile.getGender());
+        userInfo.setBirthday(profile.getBirthday());
+        if (newUserInfo) {
+            userInfoService.save(userInfo);
+        } else {
+            userInfoService.updateById(userInfo);
+        }
+
+        currentUser.setNickName(nickName);
+        currentUser.setIcon(profile.getIcon());
+        if (StrUtil.isNotBlank(token)) {
+            Map<String, Object> userMap = BeanUtil.beanToMap(currentUser, new HashMap<>(),
+                    CopyOptions.create()
+                            .setIgnoreNullValue(true)
+                            .setFieldValueEditor((fieldName, fieldValue) -> fieldValue.toString()));
+            stringRedisTemplate.opsForHash().putAll(LOGIN_USER_KEY + token, userMap);
+        }
+        return Result.ok();
+    }
+
+    @Override
+    public Result updatePassword(PasswordUpdateDTO passwordUpdate) {
+        if (passwordUpdate == null || StrUtil.isBlank(passwordUpdate.getNewPassword())) {
+            return Result.fail("新密码不能为空");
+        }
+        String newPassword = passwordUpdate.getNewPassword();
+        if (newPassword.length() < 6 || newPassword.length() > 20) {
+            return Result.fail("密码长度必须为6到20位");
+        }
+
+        Long userId = UserHolder.getUser().getId();
+        User user = getById(userId);
+        if (user == null) {
+            return Result.fail("用户不存在");
+        }
+        if (StrUtil.isNotBlank(user.getPassword())
+                && (StrUtil.isBlank(passwordUpdate.getOldPassword())
+                || !passwordMatches(passwordUpdate.getOldPassword(), user.getPassword()))) {
+            return Result.fail("原密码错误");
+        }
+
+        User update = new User();
+        update.setId(userId);
+        update.setPassword(BCrypt.hashpw(newPassword, BCrypt.gensalt()));
+        if (!updateById(update)) {
+            return Result.fail("密码保存失败");
+        }
+        return Result.ok();
+    }
+
+    @Override
+    public Result logout(String token) {
+        if (StrUtil.isBlank(token)) {
+            return Result.ok();
+        }
+        stringRedisTemplate.delete(LOGIN_USER_KEY + token);
+        return Result.ok();
     }
 
     private User createUserWithPhone(String phone) {

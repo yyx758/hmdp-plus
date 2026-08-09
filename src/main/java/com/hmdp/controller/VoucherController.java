@@ -2,6 +2,7 @@ package com.hmdp.controller;
 
 
 import com.hmdp.dto.Result;
+import com.hmdp.dto.SeckillVoucherUpdateDTO;
 import com.hmdp.entity.Voucher;
 import com.hmdp.service.IVoucherService;
 import org.springframework.web.bind.annotation.*;
@@ -31,6 +32,15 @@ public class VoucherController {
     public Result addSeckillVoucher(@RequestBody Voucher voucher) {
         voucherService.addSeckillVoucher(voucher);
         return Result.ok(voucher.getId());
+    }
+
+    /**
+     * 修改秒杀券活动信息并同步 Redis 元数据。
+     * 实时库存不通过该接口覆盖。
+     */
+    @PutMapping("seckill")
+    public Result updateSeckillVoucher(@RequestBody SeckillVoucherUpdateDTO update) {
+        return voucherService.updateSeckillVoucher(update);
     }
 
     /**

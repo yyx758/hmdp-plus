@@ -42,10 +42,7 @@ public class ShopController {
      */
     @PostMapping
     public Result saveShop(@RequestBody Shop shop) {
-        // 写入数据库
-        shopService.save(shop);
-        // 返回店铺id
-        return Result.ok(shop.getId());
+        return shopService.saveShop(shop);
     }
 
     /**
@@ -68,11 +65,18 @@ public class ShopController {
     @GetMapping("/of/type")
     public Result queryShopByType(
             @RequestParam("typeId") Integer typeId,
-            @RequestParam(value = "current", defaultValue = "1") Integer current,
+            @RequestParam(value="current", defaultValue = "1") Integer current,
             @RequestParam(value = "x", required = false) Double x,
-            @RequestParam(value = "y", required = false) Double y
+            @RequestParam(value = "y", required = false) Double y,
+            @RequestParam(value = "sortBy", defaultValue = "distance") String sortBy,
+            @RequestParam(value = "area", required = false) String area
     ) {
-       return shopService.queryShopByType(typeId, current, x, y);
+       return shopService.queryShopByType(typeId, current, x, y, sortBy, area);
+    }
+
+    @GetMapping("/areas")
+    public Result queryShopAreas(@RequestParam("typeId") Integer typeId) {
+        return shopService.queryShopAreas(typeId);
     }
 
     /**

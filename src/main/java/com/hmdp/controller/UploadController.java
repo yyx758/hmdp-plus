@@ -10,6 +10,8 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.UUID;
 
 @Slf4j
@@ -25,7 +27,7 @@ public class UploadController {
             // 生成新文件名
             String fileName = createNewFileName(originalFilename);
             // 保存文件
-            image.transferTo(new File(SystemConstants.IMAGE_UPLOAD_DIR, fileName));
+            image.transferTo(resolveImageFile(fileName));
             // 返回结果
             log.debug("文件上传成功，{}", fileName);
             return Result.ok(fileName);
@@ -36,7 +38,7 @@ public class UploadController {
 
     @GetMapping("/blog/delete")
     public Result deleteBlogImg(@RequestParam("name") String filename) {
-        File file = new File(SystemConstants.IMAGE_UPLOAD_DIR, filename);
+        File file = resolveImageFile(filename);
         if (file.isDirectory()) {
             return Result.fail("错误的文件名称");
         }
@@ -53,11 +55,31 @@ public class UploadController {
         int d1 = hash & 0xF;
         int d2 = (hash >> 4) & 0xF;
         // 判断目录是否存在
-        File dir = new File(SystemConstants.IMAGE_UPLOAD_DIR, StrUtil.format("/blogs/{}/{}", d1, d2));
+        String relativeDir = StrUtil.format("blogs/{}/{}", d1, d2);
+        File dir = resolveImageFile(relativeDir);
         if (!dir.exists()) {
-            dir.mkdirs();
+            if (!dir.mkdirs()) {
+                throw new IllegalStateException("无法创建图片上传目录");
+            }
         }
         // 生成文件名
-        return StrUtil.format("/blogs/{}/{}/{}.{}", d1, d2, name, suffix);
+        return StrUtil.format("/{}/{}.{}", relativeDir, name, suffix);
+    }
+
+    private File resolveImageFile(String filename) {
+        String relativePath = filename.replace('\\', '/');
+        if (relativePath.startsWith("/imgs/")) {
+            relativePath = relativePath.substring("/imgs/".length());
+        }
+        while (relativePath.startsWith("/")) {
+            relativePath = relativePath.substring(1);
+        }
+
+        Path uploadRoot = Paths.get(SystemConstants.IMAGE_UPLOAD_DIR).toAbsolutePath().normalize();
+        Path target = uploadRoot.resolve(relativePath).normalize();
+        if (!target.startsWith(uploadRoot)) {
+            throw new IllegalArgumentException("错误的文件名称");
+        }
+        return target.toFile();
     }
 }

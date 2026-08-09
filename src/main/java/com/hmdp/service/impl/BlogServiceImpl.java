@@ -4,6 +4,7 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.ScrollResult;
 import com.hmdp.dto.UserDTO;
@@ -19,6 +20,7 @@ import com.hmdp.utils.UserHolder;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
 import java.util.ArrayList;
@@ -164,6 +166,68 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         }
         // 5.返回id
         return Result.ok(blog.getId());
+    }
+
+    @Override
+    @Transactional
+    public Result updateBlog(Long id, Blog request) {
+        Blog stored = getById(id);
+        if (stored == null) {
+            return Result.fail("笔记不存在");
+        }
+        UserDTO user = UserHolder.getUser();
+        if (user == null || !stored.getUserId().equals(user.getId())) {
+            return Result.fail("无权操作该笔记");
+        }
+        if (StrUtil.isBlank(request.getTitle())) {
+            return Result.fail("请输入标题");
+        }
+        if (StrUtil.isBlank(request.getContent())) {
+            return Result.fail("请输入正文内容");
+        }
+        if (StrUtil.isBlank(request.getImages())) {
+            return Result.fail("请至少上传一张图片");
+        }
+        if (request.getShopId() == null) {
+            return Result.fail("请选择关联商户");
+        }
+
+        Blog update = new Blog()
+                .setId(id)
+                .setTitle(request.getTitle().trim())
+                .setContent(request.getContent().trim())
+                .setImages(request.getImages())
+                .setShopId(request.getShopId());
+        if (!updateById(update)) {
+            return Result.fail("修改笔记失败");
+        }
+        return Result.ok();
+    }
+
+    @Override
+    @Transactional
+    public Result deleteBlog(Long id) {
+        Blog stored = getById(id);
+        if (stored == null) {
+            return Result.fail("笔记不存在");
+        }
+        UserDTO user = UserHolder.getUser();
+        if (user == null || !stored.getUserId().equals(user.getId())) {
+            return Result.fail("无权操作该笔记");
+        }
+
+        if (!removeById(id)) {
+            return Result.fail("删除笔记失败");
+        }
+
+        List<Follow> follows = followService.list(
+                new QueryWrapper<Follow>().eq("follow_user_id", user.getId()));
+        stringRedisTemplate.delete(BLOG_LIKED_KEY + id);
+        for (Follow follow : follows) {
+            stringRedisTemplate.opsForZSet()
+                    .remove(FEED_KEY + follow.getUserId(), id.toString());
+        }
+        return Result.ok();
     }
 
     @Override

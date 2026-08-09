@@ -31,3 +31,10 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Local runtime and benchmark artifacts ###
+.codex-tmp/
+.env
+*.jtl
+aggregate.csv
+apifox-seckill-users.csv

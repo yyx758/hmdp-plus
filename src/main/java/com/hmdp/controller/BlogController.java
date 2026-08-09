@@ -1,6 +1,7 @@
 package com.hmdp.controller;
 
 
+import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
@@ -29,7 +30,29 @@ public class BlogController {
 
     @PostMapping
     public Result saveBlog(@RequestBody Blog blog) {
+        if (StrUtil.isBlank(blog.getTitle())) {
+            return Result.fail("请输入标题");
+        }
+        if (StrUtil.isBlank(blog.getContent())) {
+            return Result.fail("请输入正文内容");
+        }
+        if (StrUtil.isBlank(blog.getImages())) {
+            return Result.fail("请至少上传一张图片");
+        }
+        if (blog.getShopId() == null) {
+            return Result.fail("请选择关联商户");
+        }
         return blogService.saveBlog(blog);
+    }
+
+    @PutMapping("/{id}")
+    public Result updateBlog(@PathVariable("id") Long id, @RequestBody Blog blog) {
+        return blogService.updateBlog(id, blog);
+    }
+
+    @DeleteMapping("/{id}")
+    public Result deleteBlog(@PathVariable("id") Long id) {
+        return blogService.deleteBlog(id);
     }
 
     @PutMapping("/like/{id}")

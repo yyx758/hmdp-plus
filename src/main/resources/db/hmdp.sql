@@ -98,6 +98,10 @@ CREATE TABLE `tb_seckill_voucher`  (
 -- ----------------------------
 -- Records of tb_seckill_voucher
 -- ----------------------------
+INSERT INTO `tb_seckill_voucher` VALUES (2, 100, CURRENT_TIMESTAMP, DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 DAY), DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 30 DAY), CURRENT_TIMESTAMP);
+INSERT INTO `tb_seckill_voucher` VALUES (3, 50, CURRENT_TIMESTAMP, DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 DAY), DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 30 DAY), CURRENT_TIMESTAMP);
+INSERT INTO `tb_seckill_voucher` VALUES (4, 30, CURRENT_TIMESTAMP, DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 1 DAY), DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 31 DAY), CURRENT_TIMESTAMP);
+INSERT INTO `tb_seckill_voucher` VALUES (5, 20, CURRENT_TIMESTAMP, DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 30 DAY), DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 DAY), CURRENT_TIMESTAMP);
 
 -- ----------------------------
 -- Table structure for tb_shop
@@ -239,6 +243,11 @@ CREATE TABLE `tb_voucher`  (
 -- Records of tb_voucher
 -- ----------------------------
 INSERT INTO `tb_voucher` VALUES (1, 1, '50元代金券', '周一至周日均可使用', '全场通用\\n无需预约\\n可无限叠加\\不兑现、不找零\\n仅限堂食', 4750, 5000, 0, 1, '2022-01-04 09:42:39', '2022-01-04 09:43:31');
+INSERT INTO `tb_voucher` VALUES (2, 1, '9.9元秒杀50元代金券', '限量100张，正在秒杀', '每人限购1张\\n仅限堂食\\n不可与其他优惠同享', 990, 5000, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+INSERT INTO `tb_voucher` VALUES (3, 3, '19.9元秒杀100元代金券', '限量50张，正在秒杀', '每人限购1张\\n仅限堂食\\n不可兑换现金', 1990, 10000, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+INSERT INTO `tb_voucher` VALUES (4, 5, '29.9元秒杀100元代金券', '明日开抢，用于学习开始时间校验', '每人限购1张\\n活动开始后方可抢购', 2990, 10000, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+INSERT INTO `tb_voucher` VALUES (5, 10, '19.9元秒杀80元欢唱券', '活动已结束，用于学习结束时间校验', '每人限购1张\\n仅限指定时段使用', 1990, 8000, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+INSERT INTO `tb_voucher` VALUES (6, 3, '88元抵100元普通代金券', '普通券，用于和秒杀券对照', '周一至周日均可使用\\n无需预约\\n不可兑换现金', 8800, 10000, 0, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
 
 -- ----------------------------
 -- Table structure for tb_voucher_order
@@ -255,7 +264,8 @@ CREATE TABLE `tb_voucher_order`  (
   `use_time` timestamp NULL DEFAULT NULL COMMENT '核销时间',
   `refund_time` timestamp NULL DEFAULT NULL COMMENT '退款时间',
   `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_user_voucher`(`user_id`, `voucher_id`) USING BTREE
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci ROW_FORMAT = Compact;
 
 -- ----------------------------
