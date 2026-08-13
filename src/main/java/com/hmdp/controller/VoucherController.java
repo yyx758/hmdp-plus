@@ -3,7 +3,11 @@ package com.hmdp.controller;
 
 import com.hmdp.dto.Result;
 import com.hmdp.dto.SeckillVoucherUpdateDTO;
+import com.hmdp.dto.SeckillVoucherStockUpdateDTO;
+import com.hmdp.dto.VoucherSubscribeBatchDTO;
+import com.hmdp.dto.VoucherSubscribeDTO;
 import com.hmdp.entity.Voucher;
+import com.hmdp.service.ISeckillTopBuyerService;
 import com.hmdp.service.IVoucherService;
 import org.springframework.web.bind.annotation.*;
 
@@ -23,6 +27,9 @@ public class VoucherController {
     @Resource
     private IVoucherService voucherService;
 
+    @Resource
+    private ISeckillTopBuyerService seckillTopBuyerService;
+
     /**
      * 新增秒杀券
      * @param voucher 优惠券信息，包含秒杀信息
@@ -41,6 +48,11 @@ public class VoucherController {
     @PutMapping("seckill")
     public Result updateSeckillVoucher(@RequestBody SeckillVoucherUpdateDTO update) {
         return voucherService.updateSeckillVoucher(update);
+    }
+
+    @PostMapping("update/seckill/stock")
+    public Result updateSeckillVoucherStock(@RequestBody SeckillVoucherStockUpdateDTO update) {
+        return voucherService.updateSeckillVoucherStock(update);
     }
 
     /**
@@ -63,5 +75,35 @@ public class VoucherController {
     @GetMapping("/list/{shopId}")
     public Result queryVoucherOfShop(@PathVariable("shopId") Long shopId) {
        return voucherService.queryVoucherOfShop(shopId);
+    }
+
+    @PostMapping("subscribe")
+    public Result subscribe(@RequestBody VoucherSubscribeDTO request) {
+        return voucherService.subscribe(request == null ? null : request.getVoucherId());
+    }
+
+    @PostMapping("unsubscribe")
+    public Result unsubscribe(@RequestBody VoucherSubscribeDTO request) {
+        return voucherService.unsubscribe(request == null ? null : request.getVoucherId());
+    }
+
+    @PostMapping("get/subscribe/status")
+    public Result getSubscribeStatus(@RequestBody VoucherSubscribeDTO request) {
+        return voucherService.getSubscribeStatus(
+                request == null ? null : request.getVoucherId());
+    }
+
+    @PostMapping("get/subscribe/status/batch")
+    public Result getSubscribeStatusBatch(@RequestBody VoucherSubscribeBatchDTO request) {
+        return voucherService.getSubscribeStatusBatch(request);
+    }
+
+    @GetMapping("top-buyers/{shopId}")
+    public Result queryTopBuyers(
+            @PathVariable("shopId") Long shopId,
+            @RequestParam(value = "days", defaultValue = "1") int days,
+            @RequestParam(value = "limit", defaultValue = "10") int limit) {
+        return Result.ok(seckillTopBuyerService.queryTopBuyers(
+                shopId, Math.max(1, Math.min(days, 30)), Math.max(1, Math.min(limit, 100))));
     }
 }

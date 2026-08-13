@@ -1,0 +1,10 @@
+spring:
+  redis:
+    # Sentinel 只负责发现当前主节点，业务读写仍由 Redis 数据节点完成。
+    sentinel:
+      master: ${SPRING_REDIS_SENTINEL_MASTER:hmdp-master}
+      nodes: ${SPRING_REDIS_SENTINEL_NODES:127.0.0.1:26380,127.0.0.1:26381,127.0.0.1:26382}
+    timeout: ${SPRING_REDIS_TIMEOUT:2s}
+    lettuce:
+      shutdown-timeout: 200ms
+

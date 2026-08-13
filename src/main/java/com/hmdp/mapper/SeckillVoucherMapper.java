@@ -2,6 +2,8 @@ package com.hmdp.mapper;
 
 import com.hmdp.entity.SeckillVoucher;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Update;
 
 /**
  * <p>
@@ -13,4 +15,10 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
  */
 public interface SeckillVoucherMapper extends BaseMapper<SeckillVoucher> {
 
+    @Update("UPDATE tb_seckill_voucher SET stock = stock + #{changeStock}, " +
+            "update_time = CURRENT_TIMESTAMP " +
+            "WHERE voucher_id = #{voucherId} AND stock + #{changeStock} >= 0")
+    int adjustStock(
+            @Param("voucherId") Long voucherId,
+            @Param("changeStock") int changeStock);
 }

@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
+  <title>黑马点评</title>
+  <link rel="stylesheet" href="./css/element.css">
+  <link href="./css/main.css" rel="stylesheet">
+  <link href="./css/info.css" rel="stylesheet">
+  <style>
+    .save-btn {
+      position: absolute;
+      right: 16px;
+      color: #ff6633;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .edit-form {
+      padding-bottom: 80px;
+    }
+    .edit-row {
+      display: flex;
+      align-items: center;
+      min-height: 56px;
+      padding: 8px 15px;
+      background: #fff;
+    }
+    .edit-label {
+      width: 82px;
+      color: #333;
+      flex-shrink: 0;
+    }
+    .edit-control {
+      flex: 1;
+      text-align: right;
+    }
+    .edit-control .el-input__inner,
+    .edit-control .el-textarea__inner {
+      border: 0;
+      text-align: right;
+      padding-right: 0;
+    }
+    .edit-control .el-date-editor {
+      width: 100%;
+    }
+    .edit-control .el-date-editor .el-input__prefix {
+      display: none;
+    }
+    .avatar {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      object-fit: cover;
+      cursor: pointer;
+    }
+    .avatar-tip {
+      margin-left: 8px;
+      color: #999;
+      font-size: 12px;
+    }
+    .section-gap {
+      height: 10px;
+      background: #f5f5f5;
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+  <div class="header">
+    <div class="header-back-btn" @click="goBack"><i class="el-icon-arrow-left"></i></div>
+    <div class="header-title">资料编辑</div>
+    <div class="save-btn" @click="saveProfile">{{saving ? '保存中...' : '保存'}}</div>
+  </div>
+
+  <div class="edit-container edit-form">
+    <div class="edit-row">
+      <div class="edit-label">头像</div>
+      <div class="edit-control">
+        <input ref="avatarInput" type="file" accept="image/*" style="display:none" @change="uploadAvatar">
+        <img class="avatar"
+             :src="form.icon || '/imgs/icons/default-icon.png'"
+             alt="头像"
+             @click="$refs.avatarInput.click()">
+        <span class="avatar-tip">点击更换</span>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div class="edit-row">
+      <div class="edit-label">昵称</div>
+      <div class="edit-control">
+        <el-input v-model.trim="form.nickName" maxlength="32" placeholder="请输入昵称"></el-input>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div class="edit-row">
+      <div class="edit-label">个人介绍</div>
+      <div class="edit-control">
+        <el-input v-model="form.introduce"
+                  type="textarea"
+                  maxlength="128"
+                  :rows="2"
+                  placeholder="介绍一下自己"></el-input>
+      </div>
+    </div>
+
+    <div class="section-gap"></div>
+    <div class="edit-row">
+      <div class="edit-label">性别</div>
+      <div class="edit-control">
+        <el-radio-group v-model="form.gender">
+          <el-radio :label="false">男</el-radio>
+          <el-radio :label="true">女</el-radio>
+        </el-radio-group>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div class="edit-row">
+      <div class="edit-label">城市</div>
+      <div class="edit-control">
+        <el-input v-model.trim="form.city" maxlength="64" placeholder="请输入所在城市"></el-input>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div class="edit-row">
+      <div class="edit-label">生日</div>
+      <div class="edit-control">
+        <el-date-picker v-model="form.birthday"
+                        type="date"
+                        value-format="yyyy-MM-dd"
+                        placeholder="请选择生日"
+                        :picker-options="birthdayOptions"></el-date-picker>
+      </div>
+    </div>
+
+    <div class="section-gap"></div>
+    <div class="edit-row" style="cursor:pointer" @click="openPasswordPage">
+      <div class="edit-label">登录密码</div>
+      <div class="edit-control" style="color:#999">
+        设置或修改密码 <i class="el-icon-arrow-right"></i>
+      </div>
+    </div>
+  </div>
+
+  <foot-bar :active-btn="4"></foot-bar>
+</div>
+
+<script src="./js/vue.js"></script>
+<script src="./js/axios.min.js"></script>
+<script src="./js/element.js"></script>
+<script src="./js/common.js"></script>
+<script src="./js/footer.js"></script>
+<script>
+  const app = new Vue({
+    el: "#app",
+    data: {
+      user: {},
+      info: {},
+      saving: false,
+      uploading: false,
+      form: {
+        nickName: "",
+        icon: "",
+        city: "",
+        introduce: "",
+        gender: false,
+        birthday: null
+      },
+      birthdayOptions: {
+        disabledDate(time) {
+          return time.getTime() > Date.now();
+        }
+      }
+    },
+    created() {
+      this.loadProfile();
+    },
+    methods: {
+      loadProfile() {
+        axios.get("/user/me")
+          .then(({data}) => {
+            this.user = data || {};
+            return axios.get("/user/info/" + this.user.id);
+          })
+          .then(({data}) => {
+            this.info = data || {};
+            this.form = {
+              nickName: this.user.nickName || "",
+              icon: this.user.icon || "",
+              city: this.info.city || "",
+              introduce: this.info.introduce || "",
+              gender: this.info.gender === true,
+              birthday: this.info.birthday || null
+            };
+          })
+          .catch(err => {
+            this.$message.error(err);
+            setTimeout(() => location.href = "login.html", 1000);
+          });
+      },
+      uploadAvatar(event) {
+        const file = event.target.files[0];
+        event.target.value = "";
+        if (!file) return;
+        if (!file.type.startsWith("image/")) {
+          this.$message.error("请选择图片文件");
+          return;
+        }
+        if (file.size > 10 * 1024 * 1024) {
+          this.$message.error("头像不能超过10MB");
+          return;
+        }
+        const formData = new FormData();
+        formData.append("file", file);
+        this.uploading = true;
+        axios.post("/upload/blog", formData, {
+          headers: {"Content-Type": "multipart/form-data"}
+        })
+          .then(({data}) => {
+            this.form.icon = "/imgs" + data;
+            this.$message.success("头像上传成功，请保存资料");
+          })
+          .catch(err => this.$message.error(err))
+          .finally(() => this.uploading = false);
+      },
+      saveProfile() {
+        if (this.saving || this.uploading) return;
+        if (!this.form.nickName || !this.form.nickName.trim()) {
+          this.$message.error("昵称不能为空");
+          return;
+        }
+        this.saving = true;
+        axios.put("/user/profile", this.form)
+          .then(() => {
+            sessionStorage.setItem("userInfo", JSON.stringify({
+              city: this.form.city,
+              introduce: this.form.introduce,
+              gender: this.form.gender,
+              birthday: this.form.birthday
+            }));
+            this.$message.success("资料保存成功");
+            setTimeout(() => location.href = "info.html", 500);
+          })
+          .catch(err => this.$message.error(err))
+          .finally(() => this.saving = false);
+      },
+      goBack() {
+        history.back();
+      },
+      openPasswordPage() {
+        location.href = "password-edit.html";
+      }
+    }
+  });
+</script>
+</body>
+</html>

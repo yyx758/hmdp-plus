@@ -265,7 +265,8 @@ CREATE TABLE `tb_voucher_order`  (
   `refund_time` timestamp NULL DEFAULT NULL COMMENT '退款时间',
   `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
-  UNIQUE INDEX `uk_user_voucher`(`user_id`, `voucher_id`) USING BTREE
+  INDEX `idx_user_voucher_status`(`user_id`, `voucher_id`, `status`) USING BTREE,
+  INDEX `idx_voucher_status_user`(`voucher_id`, `status`, `user_id`) USING BTREE
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci ROW_FORMAT = Compact;
 
 -- ----------------------------

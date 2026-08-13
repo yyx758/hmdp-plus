@@ -19,7 +19,7 @@ class RedisIdWorkerTest {
     private static final long BEGIN_TIMESTAMP = 1640995200L;
     private static final ZoneId CHINA_ZONE = ZoneId.of("Asia/Shanghai");
     private static final DateTimeFormatter DATE_FORMATTER =
-            DateTimeFormatter.ofPattern("yyyy:MM:dd");
+            DateTimeFormatter.ofPattern("yyyyMMdd");
 
     @Test
     @SuppressWarnings("unchecked")

@@ -1,0 +1,43 @@
+services:
+  app-capacity:
+    image: docker.1ms.run/library/eclipse-temurin:8-jre-jammy
+    command: ["java", "-jar", "/app/app.jar"]
+    working_dir: /app
+    environment:
+      SERVER_PORT: "8081"
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/hmdp?useSSL=false&serverTimezone=UTC&rewriteBatchedStatements=true&cachePrepStmts=true&prepStmtCacheSize=256&prepStmtCacheSqlLimit=2048
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: "123456"
+      SPRING_PROFILES_ACTIVE: redis-sentinel
+      SPRING_REDIS_PASSWORD: "123456"
+      SPRING_REDIS_SENTINEL_MASTER: hmdp-master
+      SPRING_REDIS_SENTINEL_NODES: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      HMDP_SHOP_CACHE_TOPIC_REPLICAS: "1"
+      HMDP_SHOP_CACHE_MIN_IN_SYNC_REPLICAS: "1"
+      HMDP_SECKILL_VOUCHER_CACHE_REPLICAS: "1"
+      HMDP_SECKILL_VOUCHER_CACHE_MIN_IN_SYNC_REPLICAS: "1"
+      HMDP_SECKILL_ORDER_REPLICAS: "1"
+      HMDP_SECKILL_ORDER_MIN_IN_SYNC_REPLICAS: "1"
+      HMDP_SECKILL_RATE_LIMIT_ENABLED: "false"
+      HMDP_SECKILL_ADAPTIVE_RATE_LIMIT_ENABLED: "false"
+      HMDP_SECKILL_ACCESS_TOKEN_ENABLED: "false"
+      HMDP_SECKILL_ORDER_ID_MODE: "${HMDP_SECKILL_ORDER_ID_MODE:-db-segment}"
+      HMDP_SECKILL_ORDER_ID_SEGMENT_STEP: "10000"
+      HMDP_SECKILL_ORDER_ID_PREFETCH_PERCENT: "20"
+      HMDP_SECKILL_MARKETING_ENABLED: "false"
+      HMDP_SECKILL_ORDER_CONSUMER_GROUP: hmdp-capacity-seckill-order-v1
+      HMDP_SECKILL_ORDER_DLT_CONSUMER_GROUP: hmdp-capacity-seckill-order-dlt-v1
+      HMDP_SECKILL_ORDER_CONSUMER_MAX_POLL_RECORDS: "100"
+      TZ: Asia/Shanghai
+    volumes:
+      - ../../target/hm-dianping-0.0.1-SNAPSHOT.jar:/app/app.jar:ro
+    ports:
+      - "127.0.0.1:18083:8081"
+    networks:
+      - hmdp
+
+networks:
+  hmdp:
+    external: true
+    name: hm-dianping-dev_default

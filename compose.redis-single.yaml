@@ -1,0 +1,8 @@
+# 仅用于单机 Redis 基线/故障对照，不作为生产启动方式。
+services:
+  app:
+    environment:
+      SPRING_PROFILES_ACTIVE: default
+      SPRING_REDIS_SENTINEL_MASTER: null
+      SPRING_REDIS_SENTINEL_NODES: null
+

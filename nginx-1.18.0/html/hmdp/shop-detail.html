@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>黑马点评</title>
+  <!-- 引入样式 -->
+  <link rel="stylesheet" href="./css/element.css">
+
+  <link href="./css/shop-detail.css" rel="stylesheet">
+  <link href="./css/main.css" rel="stylesheet">
+
+  <style type="text/css">
+
+  </style>
+</head>
+<body>
+<div id="app">
+  <div class="header">
+    <div class="header-back-btn" @click="goBack"><i class="el-icon-arrow-left"></i></div>
+    <div class="header-title"></div>
+    <el-popover
+        v-if="hasLogin"
+        placement="bottom-end"
+        width="310"
+        trigger="click"
+        v-model="notificationVisible"
+        @show="markAllNotificationsRead">
+      <div class="notification-panel">
+        <div class="notification-panel-title">
+          <span>消息通知</span>
+          <span v-if="notifications.length" class="notification-read-all" @click="markAllNotificationsRead">全部已读</span>
+        </div>
+        <div v-if="!notifications.length" class="notification-empty">暂无通知</div>
+        <div
+            v-for="item in notifications"
+            :key="item.id"
+            class="notification-item"
+            :class="{'notification-unread': !item.read}"
+            @click="markNotificationRead(item)">
+          <div class="notification-item-title">{{item.title}}</div>
+          <div class="notification-item-content">{{item.content}}</div>
+          <div class="notification-item-time">{{formatNotificationTime(item.createTime)}}</div>
+        </div>
+      </div>
+      <div slot="reference" class="header-notification">
+        <i class="el-icon-bell"></i>
+        <span v-if="unreadCount > 0" class="notification-badge">{{unreadCount > 99 ? '99+' : unreadCount}}</span>
+      </div>
+    </el-popover>
+    <div v-else class="header-share">...</div>
+  </div>
+  <div class="top-bar"></div>
+  <div class="shop-info-box">
+    <div class="shop-title">{{shop.name}}</div>
+    <div class="shop-rate">
+      <el-rate
+          disabled v-model="shop.score/10"
+          text-color="#F63"
+          show-score
+      ></el-rate>
+      <span>{{shop.comments}}条</span>
+    </div>
+    <div class="shop-rate-info"> 口味:4.9  环境:4.8  服务:4.7 </div>
+    <div class="shop-rank">
+      <img src="/imgs/bd.png" width="63" height="20" alt="">
+      <span>拱墅区好评榜第3名</span>
+      <div><i class="el-icon-arrow-right"></i></div>
+    </div>
+    <div class="shop-images">
+      <div v-for="(s,i) in shop.images" :key="i">
+        <img :src="s" alt="">
+      </div>
+    </div>
+    <div class="shop-address">
+      <div><i class="el-icon-map-location"></i></div>
+      <span>{{shop.address}}</span>
+      <div style="width: 10px; flex-grow: 2; text-align: center; color: #e1e2e3">|</div>
+      <div style="margin: 0 5px"><img src="https://p0.meituan.net/travelcube/bf684aa196c870810655e45b1e52ce843484.png@24w_16h_40q" alt=""></div>
+      <div><img src="https://p0.meituan.net/travelcube/9277ace32123e0c9f59dedf4407892221566.png@24w_24h_40q" alt=""></div>
+    </div>
+  </div>
+  <div class="shop-divider"></div>
+  <div class="shop-open-time">
+    <span><i class="el-icon-watch"></i></span>
+    <div>营业时间</div>
+    <div>{{shop.openHours}}</div>
+    <span class="line-right">查看详情 <i class="el-icon-arrow-right"></i></span>
+  </div>
+  <div class="shop-divider"></div>
+  <div class="shop-voucher">
+    <div>
+      <span class="voucher-icon">券</span>
+      <span style="font-weight: bold;">代金券</span>
+    </div>
+    <div class="voucher-box" v-for="v in vouchers" :key="v.id" v-if="!isEnd(v)">
+      <div class="voucher-circle">
+        <div class="voucher-b"></div>
+        <div class="voucher-b"></div>
+        <div class="voucher-b"></div>
+      </div>
+      <div class="voucher-left">
+        <div class="voucher-title">{{v.title}}</div>
+        <div class="voucher-subtitle">{{v.subTitle}}</div>
+        <div class="voucher-price"><div>￥ {{util.formatPrice(v.payValue)}}</div>  <span>{{(v.payValue*10)/v.actualValue}}折</span></div>
+      </div>
+      <div class="voucher-right">
+        <div v-if="v.type" class="seckill-box">
+          <div
+              class="voucher-btn"
+              :class="{'disable-btn': isNotBegin(v) || v.stock < 1 || isPurchased(v.id) || seckillInProgress}"
+              @click="seckill(v)">限时抢购</div>
+          <div class="seckill-stock">剩余 <span>{{v.stock}}</span> 张</div>
+          <div class="seckill-time">{{formatTime(v)}}</div>
+          <div v-if="isPurchased(v.id)" class="seckill-status">
+            <span class="purchased-tag">已领取</span>
+            <span class="cancel-link" @click.stop="cancelVoucher(v)">取消领取</span>
+          </div>
+          <div v-else-if="Number(v.stock) < 1" class="subscribe-box">
+            <div v-if="isSubscribed(v.id)" class="subscribe-status">
+              <span class="subscribed-tag">已订阅到券提醒</span>
+              <span class="cancel-subscribe" @click.stop="unsubscribeVoucher(v)">取消订阅</span>
+            </div>
+            <div v-else class="subscribe-status">
+              <span class="subscribe-link" @click.stop="subscribeVoucher(v)">到券提醒</span>
+            </div>
+          </div>
+        </div>
+        <div class="voucher-btn" v-else>抢购</div>
+      </div>
+    </div>
+  </div>
+  <div v-if="topBuyers.length" class="top-buyers-card">
+    <div class="top-buyers-title"><i class="el-icon-trophy"></i> 今日到店 Top 买家</div>
+    <div class="top-buyers-list">
+      <div v-for="(buyer,index) in topBuyers" :key="buyer.userId" class="top-buyer-item">
+        <span class="top-buyer-rank">{{index + 1}}</span>
+        <img :src="buyer.icon || './imgs/icons/default-icon.png'" alt="">
+        <span class="top-buyer-name">{{buyer.nickName || ('用户' + buyer.userId)}}</span>
+        <span class="top-buyer-score">{{buyer.score}} 次</span>
+      </div>
+    </div>
+  </div>
+  <div class="shop-divider"></div>
+  <div class="shop-comments">
+    <div class="comments-head">
+      <div>网友评价 <span>（119）</span></div>
+      <div><i class="el-icon-arrow-right"></i></div>
+    </div>
+    <div class="comment-tags">
+      <div class="tag">味道赞(19)</div>
+      <div class="tag">牛肉赞(16)</div>
+      <div class="tag">菜品不错(11)</div>
+      <div class="tag">回头客(4)</div>
+      <div class="tag">分量足(4)</div>
+      <div class="tag">停车方便(3)</div>
+      <div class="tag">海鲜棒(3)</div>
+      <div class="tag">饮品赞(3)</div>
+      <div class="tag">朋友聚餐(6)</div>
+    </div>
+    <div class="comment-list">
+      <div class="comment-box" v-for="i in 3" :key="i">
+        <div class="comment-icon">
+          <img src="https://p0.meituan.net/userheadpicbackend/57e44d6eba01aad0d8d711788f30a126549507.jpg%4048w_48h_1e_1c_1l%7Cwatermark%3D0" alt="">
+        </div>
+        <div class="comment-info">
+          <div class="comment-user">叶小乙 <span>Lv5</span></div>
+          <div style="display: flex;">
+            打分
+            <el-rate disabled v-model="4.5" ></el-rate>
+          </div>
+          <div style="padding: 5px 0; font-size: 14px">
+            某平台上买的券，价格可以当工作餐吃，虽然价格便宜，但是这家店一点都没有...
+          </div>
+          <div class="comment-images">
+            <img src="https://qcloud.dpfile.com/pc/6T7MfXzx7USPIkSy7jzm40qZSmlHUF2jd-FZUL6WpjE9byagjLlrseWxnl1LcbuSGybIjx5eX6WNgCPvcASYAw.jpg" alt="">
+            <img src="https://qcloud.dpfile.com/pc/sZ5q-zgglv4VXEWU71xCFjnLM_jUHq-ylq0GKivtrz3JksWQ1f7oBWZsxm1DWgcaGybIjx5eX6WNgCPvcASYAw.jpg" alt="">
+            <img src="https://qcloud.dpfile.com/pc/xZy6W4NwuRFchlOi43DVLPFsx7KWWvPqifE1JTe_jreqdsBYA9CFkeSm2ZlF0OVmGybIjx5eX6WNgCPvcASYAw.jpg" alt="">
+            <img src="https://qcloud.dpfile.com/pc/xZy6W4NwuRFchlOi43DVLPFsx7KWWvPqifE1JTe_jreqdsBYA9CFkeSm2ZlF0OVmGybIjx5eX6WNgCPvcASYAw.jpg" alt="">
+          </div>
+          <div>
+            浏览641 &nbsp;&nbsp;&nbsp;&nbsp;评论5
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; justify-content: space-between;padding: 15px 0; border-top: 1px solid #f1f1f1; margin-top: 10px;">
+        <div>查看全部119条评价</div>
+        <div><i class="el-icon-arrow-right"></i></div>
+      </div>
+    </div>
+  </div>
+  <div class="shop-divider"></div>
+  <div class="copyright">
+    copyright ©2021 hmdp.com
+  </div>
+</div>
+<script src="./js/vue.js"></script>
+<script src="./js/axios.min.js"></script>
+<!-- 引入组件库 -->
+<script src="./js/element.js"></script>
+<script src="./js/common.js"></script>
+<script>
+
+  const app = new Vue({
+    el: "#app",
+    data: {
+      util,
+      shop: {},
+      vouchers: [],
+      purchasedMap: {},
+      subscribeStatusMap: {},
+      topBuyers: [],
+      seckillInProgress: false,
+      notifications: [],
+      unreadCount: 0,
+      notificationVisible: false,
+      notificationTimer: null,
+      lastNotificationId: null
+    },
+    computed: {
+      hasLogin() {
+        return !!token;
+      }
+    },
+    created() {
+      // 获取参数
+      let shopId = util.getUrlParam("id");
+      // 查询酒店信息
+      this.queryShopById(shopId);
+      // 查询优惠券信息
+      this.queryVoucher(shopId);
+      this.queryTopBuyers(shopId);
+      if(token){
+        this.queryNotifications(false);
+        this.notificationTimer = setInterval(() => this.queryNotifications(true), 15000);
+      }
+    },
+    beforeDestroy() {
+      if(this.notificationTimer){
+        clearInterval(this.notificationTimer);
+      }
+    },
+    methods: {
+      goBack() {
+        history.back();
+      },
+      queryShopById(shopId) {
+        axios.get("/shop/" + shopId)
+        .then(({data}) => {
+          data.images = data.images.split(",")
+          this.shop = data
+        })
+        .catch(this.$message.error)
+      },
+      queryVoucher(shopId) {
+        return axios.get("/voucher/list/" + shopId)
+        .then(({data}) => {
+          this.vouchers = data;
+          if(token){
+            this.refreshPurchaseStatus();
+            this.refreshSubscribeStatus();
+          }
+        })
+        .catch(this.$message.error)
+      },
+      formatTime(v){
+        let b = new Date(v.beginTime);
+        let e = new Date(v.endTime);
+        return b.getMonth() + 1 + "月" + b.getDate() + "日 "
+          +  b.getHours() + ":" + this.formatMinutes(b.getMinutes())
+          + " ~ "/*  + e.getMonth() + 1 + "月" + e.getDate() + "日 " */
+          +  e.getHours() + ":" + this.formatMinutes(e.getMinutes());
+      },
+      formatMinutes(m){
+        if(m < 10) m = "0" + m
+        return m;
+      },
+      isNotBegin(v){
+        return new Date(v.beginTime).getTime() > new Date().getTime();
+      },
+      isEnd(v){
+        return new Date(v.endTime).getTime() < new Date().getTime();
+      },
+      isPurchased(voucherId){
+        return !!this.purchasedMap[String(voucherId)];
+      },
+      isSubscribed(voucherId){
+        return Number(this.subscribeStatusMap[String(voucherId)] || 0) === 1;
+      },
+      refreshPurchaseStatus(){
+        return Promise.all(this.vouchers.map(v => {
+          if(!v || !v.id) return;
+          return axios.get("/voucher-order/voucher/" + v.id)
+          .then(({data}) => {
+            this.$set(this.purchasedMap, String(v.id), !!data);
+          })
+          .catch(() => {});
+        }));
+      },
+      refreshSubscribeStatus(){
+        const voucherIdList = this.vouchers.filter(v => v && v.id).map(v => v.id);
+        if(!voucherIdList.length) return;
+        axios.post("/voucher/get/subscribe/status/batch", {voucherIdList})
+        .then(({data}) => {
+          (data || []).forEach(item => {
+            this.$set(this.subscribeStatusMap, String(item.voucherId), Number(item.subscribeStatus || 0));
+          });
+        })
+        .catch(() => {});
+      },
+      async seckill(v){
+        if(!token){
+          this.$message.error("请先登录")
+          // 未登录，跳转
+          setTimeout(() => {
+            location.href = "/login.html"
+          }, 200);
+          return;
+        }
+        if(this.isNotBegin(v)){
+          this.$message.error("优惠券抢购尚未开始！")
+          return;
+        }
+        if(this.isEnd(v)){
+          this.$message.error("优惠券抢购已经结束！")
+          return;
+        }
+        if(v.stock < 1){
+          this.$message.error("库存不足，请刷新再试试！")
+          return;
+        }
+        if(this.isPurchased(v.id) || this.seckillInProgress){
+          return;
+        }
+        let id = v.id;
+        this.seckillInProgress = true;
+        const loading = this.$loading({lock: true, text: "正在抢购，请稍候...", background: "rgba(0, 0, 0, 0.35)"});
+        try {
+          const tokenResult = await axios.get("/voucher-order/seckill/token/" + id);
+          const accessToken = tokenResult.data;
+          const accepted = await axios.post(
+            "/voucher-order/seckill/" + id,
+            null,
+            {params: {accessToken}}
+          );
+          // common.js returns Result directly, so the payload is accepted.data.
+          const order = accepted && accepted.data;
+          const orderId = order && (typeof order === "object" ? order.orderId : order);
+          if (!orderId) {
+            this.$message.success("抢购成功，订单正在处理中");
+            this.$set(this.purchasedMap, String(v.id), true);
+            await this.queryVoucher(this.shop.id);
+            return;
+          }
+          await this.pollSeckillOrder(orderId, v);
+        } catch (error) {
+          this.$message.error(error || "抢购失败");
+        } finally {
+          this.seckillInProgress = false;
+          loading.close();
+        }
+      },
+      async pollSeckillOrder(orderId, voucher){
+        const deadline = Date.now() + 12000;
+        while(Date.now() < deadline){
+          try {
+            const result = await axios.get("/voucher-order/seckill/status/" + orderId);
+            const status = result.data || {};
+            if(status.status === "SUCCESS" || status.status === "DUPLICATE_EXISTING"){
+              this.$message.success(status.message || "抢购成功");
+              this.$set(this.purchasedMap, String(voucher.id), true);
+              await this.queryVoucher(this.shop.id);
+              return;
+            }
+            if(status.status === "MANUAL_REVIEW"){
+              this.$message.warning(status.message || "订单正在人工核对");
+              return;
+            }
+            if(status.status === "CANCELLED"){
+              this.$message.info("订单已取消");
+              return;
+            }
+          } catch (ignored) {}
+          await new Promise(resolve => setTimeout(resolve, 700));
+        }
+        this.$message.warning("订单仍在处理中，请稍后查看通知");
+      },
+      async cancelVoucher(v){
+        try {
+          await this.$confirm("取消后库存将回流，确认取消？", "取消领取", {type: "warning"});
+          await axios.post("/voucher-order/cancel", {voucherId: v.id});
+          this.$set(this.purchasedMap, String(v.id), false);
+          this.$message.success("已取消领取");
+          await this.queryVoucher(this.shop.id);
+        } catch (error) {
+          if(error !== "cancel" && error !== "close") {
+            // A repeated cancel can fail after the server has already restored
+            // eligibility. Repair any stale local state from the active order.
+            try {
+              const result = await axios.get("/voucher-order/voucher/" + v.id);
+              this.$set(this.purchasedMap, String(v.id), !!result.data);
+              if(!result.data) {
+                await this.queryVoucher(this.shop.id);
+                await this.refreshPurchaseStatus();
+                this.$message.success("订单已取消，购买资格已恢复");
+                return;
+              }
+            } catch (ignored) {}
+            this.$message.error(error || "取消失败");
+          }
+        }
+      },
+      async subscribeVoucher(v){
+        try {
+          await axios.post("/voucher/subscribe", {voucherId: v.id});
+          this.$set(this.subscribeStatusMap, String(v.id), 1);
+          this.$message.success("已订阅到券提醒");
+        } catch (error) {
+          this.$message.error(error || "订阅失败");
+        }
+      },
+      async unsubscribeVoucher(v){
+        try {
+          await axios.post("/voucher/unsubscribe", {voucherId: v.id});
+          this.$set(this.subscribeStatusMap, String(v.id), 0);
+          this.$message.success("已取消订阅");
+        } catch (error) {
+          this.$message.error(error || "取消订阅失败");
+        }
+      },
+      queryTopBuyers(shopId){
+        axios.get("/voucher/top-buyers/" + shopId, {params: {days: 1, limit: 5}})
+        .then(({data}) => this.topBuyers = data || [])
+        .catch(() => {});
+      },
+      queryNotifications(showToast){
+        axios.get("/notifications", {params: {limit: 20}})
+        .then(({data}) => {
+          const list = data || [];
+          const newest = list.length ? String(list[0].id) : null;
+          if(showToast && newest && this.lastNotificationId && newest !== this.lastNotificationId){
+            const item = list[0];
+            this.$notify({title: item.title, message: item.content, type: "success", duration: 5000});
+            if(item.type === "AUTO_ISSUE"){
+              this.queryVoucher(this.shop.id);
+            }
+          }
+          this.notifications = list;
+          axios.get("/notifications/unread-count")
+          .then(({data}) => this.unreadCount = Number(data || 0))
+          .catch(() => this.unreadCount = list.filter(item => !item.read).length);
+          this.lastNotificationId = newest;
+        })
+        .catch(() => {});
+      },
+      markNotificationRead(item){
+        if(!item || item.read) return;
+        axios.post("/notifications/" + item.id + "/read")
+        .then(() => {
+          this.$set(item, "read", true);
+          this.unreadCount = Math.max(0, this.unreadCount - 1);
+        })
+        .catch(() => {});
+      },
+      markAllNotificationsRead(){
+        if(!this.unreadCount) return;
+        axios.post("/notifications/read-all")
+        .then(() => {
+          this.notifications.forEach(item => this.$set(item, "read", true));
+          this.unreadCount = 0;
+        })
+        .catch(() => {});
+      },
+      formatNotificationTime(timestamp){
+        if(!timestamp) return "";
+        const date = new Date(Number(timestamp));
+        return (date.getMonth() + 1) + "月" + date.getDate() + "日 "
+          + this.formatMinutes(date.getHours()) + ":" + this.formatMinutes(date.getMinutes());
+      }
+    }
+  })
+</script>
+</body>
+</html>

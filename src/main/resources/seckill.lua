@@ -7,8 +7,10 @@ local userId = ARGV[2]
 local orderId = ARGV[3]
 -- 1.4.当前时间戳
 local currentTime = tonumber(ARGV[4])
--- 1.5.订单处理结果保留时长
-local resultTtlMillis = tonumber(ARGV[5])
+-- 1.5.前置资格令牌
+local accessToken = ARGV[5]
+-- 1.6.是否启用资格令牌
+local accessTokenEnabled = ARGV[6] == '1'
 
 -- 2.数据key
 -- 2.1.库存key
@@ -17,8 +19,17 @@ local stockKey = 'seckill:stock:' .. voucherId
 local orderKey = 'seckill:order:' .. voucherId
 -- 2.3.秒杀券活动信息key
 local metaKey = 'seckill:meta:' .. voucherId
--- 2.4.订单处理结果key
-local resultKey = 'seckill:order:result:' .. orderId
+-- 2.4.资格令牌key
+local accessTokenKey = 'seckill:access:token:{' .. voucherId .. '}:' .. userId
+-- 2.5.Redis到MySQL Outbox的临时交接队列
+local handoffKey = 'seckill:order:handoff:{' .. voucherId .. '}'
+local recoveryKey = 'seckill:recovery:' .. voucherId
+local acceptedKey = 'seckill:order:accepted'
+
+-- 恢复过程中不接受新预扣，避免数据库快照与新请求交叉。
+if(redis.call('exists', recoveryKey) == 1) then
+    return 8
+end
 
 -- 3.脚本业务
 -- 3.1.获取秒杀活动开始时间和结束时间
@@ -26,7 +37,7 @@ local beginTime = tonumber(redis.call('hget', metaKey, 'beginTime'))
 local endTime = tonumber(redis.call('hget', metaKey, 'endTime'))
 local status = tonumber(redis.call('hget', metaKey, 'status'))
 -- 3.2.判断秒杀活动配置是否存在
-if(not currentTime or not resultTtlMillis or not beginTime or not endTime or not status) then
+if(not currentTime or not beginTime or not endTime or not status) then
     -- 3.3.活动配置不存在，返回3
     return 3
 end
@@ -55,20 +66,25 @@ if(redis.call('sismember', orderKey, userId) == 1) then
     -- 3.12.存在，说明是重复下单，返回2
     return 2
 end
--- 3.13.扣库存 incrby stockKey -1
+-- 3.13.资格令牌必须和预扣处于同一个Lua原子边界，避免令牌先被消费而预扣未发生
+if accessTokenEnabled then
+    local storedToken = redis.call('get', accessTokenKey)
+    if not storedToken or storedToken ~= accessToken then
+        return 7
+    end
+end
+-- 3.14.消费资格令牌
+if accessTokenEnabled then
+    redis.call('del', accessTokenKey)
+end
+-- 3.15.扣库存 incrby stockKey -1
 redis.call('incrby', stockKey, -1)
--- 3.14.下单（保存用户）sadd orderKey userId
+-- 3.16.下单（保存用户）sadd orderKey userId
 redis.call('sadd', orderKey, userId)
--- 3.15.发送消息到队列中， XADD stream.orders * k1 v1 k2 v2 ...
-redis.call('xadd', 'stream.orders', '*', 'userId', userId, 'voucherId', voucherId, 'id', orderId)
--- 3.16.记录异步订单的初始处理状态
-redis.call('hset', resultKey,
-        'orderId', orderId,
-        'userId', userId,
-        'voucherId', voucherId,
-        'status', 'PROCESSING',
-        'message', '抢购请求已受理，订单正在处理中',
-        'updatedAt', currentTime)
--- 3.17.设置处理结果过期时间，避免状态key无限增长
-redis.call('pexpire', resultKey, resultTtlMillis)
+-- 3.17.只写一条临时Handoff；Outbox提交后删除，不再维护Stream和Redis PROCESSING状态
+local handoffMember = orderId .. '|' .. userId .. '|0'
+redis.call('zadd', handoffKey, currentTime, handoffMember)
+-- 对外已提示抢券成功时，Outbox 可能尚未创建；该短期凭证供内部状态查询校验订单归属。
+-- Handoff 转存 Outbox 后立即 HDEL，避免为高峰订单创建海量独立 key。
+redis.call('hset', acceptedKey, orderId, userId .. '|' .. voucherId)
 return 0

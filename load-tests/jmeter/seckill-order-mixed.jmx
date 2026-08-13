@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="真实秒杀下单接口 A/B/C 混合压测" enabled="true">
+      <stringProp name="TestPlan.comments">恶意高频下单和正常用户真实下单并行执行；按 JSON success 字段区分业务受理与业务拒绝。</stringProp>
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="用户变量" enabled="true">
+        <collectionProp name="Arguments.arguments"/>
+      </elementProp>
+      <stringProp name="TestPlan.user_define_classpath"/>
+    </TestPlan>
+    <hashTree>
+      <ConfigTestElement guiclass="HttpDefaultsGui" testclass="ConfigTestElement" testname="HTTP 默认配置" enabled="true">
+        <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="用户变量" enabled="true">
+          <collectionProp name="Arguments.arguments"/>
+        </elementProp>
+        <stringProp name="HTTPSampler.domain">${__P(host,127.0.0.1)}</stringProp>
+        <stringProp name="HTTPSampler.port">${__P(port,18081)}</stringProp>
+        <stringProp name="HTTPSampler.protocol">http</stringProp>
+        <stringProp name="HTTPSampler.connect_timeout">3000</stringProp>
+        <stringProp name="HTTPSampler.response_timeout">5000</stringProp>
+        <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
+      </ConfigTestElement>
+      <hashTree/>
+
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="恶意下单流量" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="循环控制器" enabled="true">
+          <boolProp name="LoopController.continue_forever">true</boolProp>
+          <stringProp name="LoopController.loops">-1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">${__P(attack_threads,200)}</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">${__P(attack_ramp_seconds,2)}</stringProp>
+        <boolProp name="ThreadGroup.scheduler">true</boolProp>
+        <stringProp name="ThreadGroup.duration">${__P(duration_seconds,30)}</stringProp>
+        <stringProp name="ThreadGroup.delay">0</stringProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
+      </ThreadGroup>
+      <hashTree>
+        <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="恶意请求头" enabled="true">
+          <collectionProp name="HeaderManager.headers">
+            <elementProp name="" elementType="Header"><stringProp name="Header.name">authorization</stringProp><stringProp name="Header.value">${attack_token}</stringProp></elementProp>
+            <elementProp name="" elementType="Header"><stringProp name="Header.name">X-Forwarded-For</stringProp><stringProp name="Header.value">10.0.0.66</stringProp></elementProp>
+            <elementProp name="" elementType="Header"><stringProp name="Header.name">X-Load-Test-Client</stringProp><stringProp name="Header.value">seckill-order-attack</stringProp></elementProp>
+            <elementProp name="" elementType="Header"><stringProp name="Header.name">Accept</stringProp><stringProp name="Header.value">application/json</stringProp></elementProp>
+          </collectionProp>
+        </HeaderManager>
+        <hashTree/>
+        <PreciseThroughputTimer guiclass="TestBeanGUI" testclass="PreciseThroughputTimer" testname="恶意流量固定吞吐" enabled="true">
+          <stringProp name="batchSize">1</stringProp>
+          <stringProp name="batchThreadDelay">0</stringProp>
+          <stringProp name="duration">${__P(duration_seconds,30)}</stringProp>
+          <stringProp name="exactLimit">${__P(attack_exact_limit,90000)}</stringProp>
+          <stringProp name="allowedThroughputSurplus">1.0</stringProp>
+          <stringProp name="randomSeed">20260812</stringProp>
+          <stringProp name="throughput">${__P(attack_qps,3000.0)}</stringProp>
+          <stringProp name="throughputPeriod">1</stringProp>
+        </PreciseThroughputTimer>
+        <hashTree/>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="ATTACK_ORDER" enabled="true">
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="请求参数" enabled="true"><collectionProp name="Arguments.arguments"/></elementProp>
+          <stringProp name="HTTPSampler.path">${__P(path_prefix,)}/voucher-order/seckill/${__P(attack_voucher_id,987654331)}</stringProp>
+          <stringProp name="HTTPSampler.method">POST</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <boolProp name="HTTPSampler.DO_MULTIPART_POST">false</boolProp>
+          <stringProp name="HTTPSampler.implementation">HttpClient4</stringProp>
+          <stringProp name="HTTPSampler.ipSource">${__P(attack_source_ip,)}</stringProp>
+          <intProp name="HTTPSampler.ipSourceType">0</intProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <JSR223PreProcessor guiclass="TestBeanGUI" testclass="JSR223PreProcessor" testname="轮换恶意用户登录态" enabled="true">
+            <stringProp name="cacheKey">seckill-order-attack-token-v1</stringProp>
+            <stringProp name="filename"/>
+            <stringProp name="parameters"/>
+            <stringProp name="script">def poolSize = Integer.parseInt(props.getProperty('attack_user_count', '500'))
+def ordinal = Math.floorMod(ctx.getThreadNum() * 131 + vars.getIteration(), poolSize) + 1
+vars.put('attack_token', 'jmeter-order-attack-' + ordinal)</stringProp>
+            <stringProp name="scriptLanguage">groovy</stringProp>
+          </JSR223PreProcessor>
+          <hashTree/>
+          <JSR223PostProcessor guiclass="TestBeanGUI" testclass="JSR223PostProcessor" testname="标记恶意下单去向" enabled="true">
+            <stringProp name="cacheKey">seckill-order-attack-result-v1</stringProp>
+            <stringProp name="filename"/>
+            <stringProp name="parameters"/>
+            <stringProp name="script">def code = prev.getResponseCode()
+def body = prev.getResponseDataAsString()
+if ('429' == code) {
+    prev.setSampleLabel(body.contains('&quot;layer&quot;:&quot;nginx&quot;') ? 'ATTACK_NGINX_REJECTED' : 'ATTACK_APP_RATE_REJECTED')
+} else if ('200' == code &amp;&amp; (body =~ /&quot;success&quot;\s*:\s*true/).find()) {
+    prev.setSampleLabel('ATTACK_ACCEPTED')
+} else if ('200' == code) {
+    prev.setSampleLabel('ATTACK_BUSINESS_REJECTED')
+} else {
+    prev.setSampleLabel('ATTACK_OTHER_FAILED')
+}</stringProp>
+            <stringProp name="scriptLanguage">groovy</stringProp>
+          </JSR223PostProcessor>
+          <hashTree/>
+        </hashTree>
+      </hashTree>
+
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="正常真实下单流量" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="循环控制器" enabled="true">
+          <boolProp name="LoopController.continue_forever">true</boolProp>
+          <stringProp name="LoopController.loops">-1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">${__P(legit_threads,10)}</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">1</stringProp>
+        <boolProp name="ThreadGroup.scheduler">true</boolProp>
+        <stringProp name="ThreadGroup.duration">${__P(duration_seconds,30)}</stringProp>
+        <stringProp name="ThreadGroup.delay">0</stringProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
+      </ThreadGroup>
+      <hashTree>
+        <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="正常请求头" enabled="true">
+          <collectionProp name="HeaderManager.headers">
+            <elementProp name="" elementType="Header"><stringProp name="Header.name">authorization</stringProp><stringProp name="Header.value">${legit_token}</stringProp></elementProp>
+            <elementProp name="" elementType="Header"><stringProp name="Header.name">X-Forwarded-For</stringProp><stringProp name="Header.value">10.0.0.10</stringProp></elementProp>
+            <elementProp name="" elementType="Header"><stringProp name="Header.name">X-Load-Test-Client</stringProp><stringProp name="Header.value">seckill-order-legitimate</stringProp></elementProp>
+            <elementProp name="" elementType="Header"><stringProp name="Header.name">Accept</stringProp><stringProp name="Header.value">application/json</stringProp></elementProp>
+          </collectionProp>
+        </HeaderManager>
+        <hashTree/>
+        <ConstantTimer guiclass="ConstantTimerGui" testclass="ConstantTimer" testname="正常用户约每秒一次" enabled="true">
+          <stringProp name="ConstantTimer.delay">${__P(legit_delay_millis,1000)}</stringProp>
+        </ConstantTimer>
+        <hashTree/>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="LEGIT_ORDER" enabled="true">
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="请求参数" enabled="true"><collectionProp name="Arguments.arguments"/></elementProp>
+          <stringProp name="HTTPSampler.path">${__P(path_prefix,)}/voucher-order/seckill/${__P(legit_voucher_id,987654332)}</stringProp>
+          <stringProp name="HTTPSampler.method">POST</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <boolProp name="HTTPSampler.DO_MULTIPART_POST">false</boolProp>
+          <stringProp name="HTTPSampler.implementation">HttpClient4</stringProp>
+          <stringProp name="HTTPSampler.ipSource">${__P(legit_source_ip,)}</stringProp>
+          <intProp name="HTTPSampler.ipSourceType">0</intProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <JSR223PreProcessor guiclass="TestBeanGUI" testclass="JSR223PreProcessor" testname="为每次正常下单分配新用户" enabled="true">
+            <stringProp name="cacheKey">seckill-order-legit-token-v1</stringProp>
+            <stringProp name="filename"/>
+            <stringProp name="parameters"/>
+            <stringProp name="script">vars.put('legit_token', 'jmeter-order-legit-' + ctx.getThreadNum() + '-' + vars.getIteration())</stringProp>
+            <stringProp name="scriptLanguage">groovy</stringProp>
+          </JSR223PreProcessor>
+          <hashTree/>
+          <JSR223PostProcessor guiclass="TestBeanGUI" testclass="JSR223PostProcessor" testname="标记正常下单结果" enabled="true">
+            <stringProp name="cacheKey">seckill-order-legit-result-v1</stringProp>
+            <stringProp name="filename"/>
+            <stringProp name="parameters"/>
+            <stringProp name="script">def body = prev.getResponseDataAsString()
+if ('200' == prev.getResponseCode() &amp;&amp; (body =~ /&quot;success&quot;\s*:\s*true/).find()) {
+    prev.setSampleLabel('LEGIT_ACCEPTED')
+} else {
+    prev.setSampleLabel('LEGIT_FAILED')
+}</stringProp>
+            <stringProp name="scriptLanguage">groovy</stringProp>
+          </JSR223PostProcessor>
+          <hashTree/>
+        </hashTree>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

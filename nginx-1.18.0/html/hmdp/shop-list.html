@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
+  <title>黑马点评</title>
+  <!-- 引入样式 -->
+  <link rel="stylesheet" href="./css/element.css">
+
+  <link href="./css/shop-list.css?v=20260729-1" rel="stylesheet">
+  <link href="./css/main.css" rel="stylesheet">
+
+  <style type="text/css">
+
+  </style>
+</head>
+<body>
+<div id="app">
+  <div class="header">
+    <div class="header-back-btn" @click="goBack"><i class="el-icon-arrow-left"></i></div>
+    <div class="header-title">{{typeName}}</div>
+    <div class="header-search" aria-hidden="true">
+      <i class="el-icon-search"></i>
+    </div>
+  </div>
+  <div class="sort-bar">
+    <div class="sort-item">
+      <el-dropdown trigger="click" @command="handleCommand">
+      <span class="el-dropdown-link">
+        {{typeName}}<i class="el-icon-arrow-down el-icon--right"></i>
+      </span>
+        <el-dropdown-menu slot="dropdown">
+          <el-dropdown-item v-for="t in types" :key="t.id" :command="t">
+            {{t.name}}
+          </el-dropdown-item>
+        </el-dropdown-menu>
+      </el-dropdown>
+    </div>
+    <div class="sort-item">
+      <el-dropdown trigger="click" @command="changeArea">
+        <span class="el-dropdown-link">
+          {{selectedArea || '全部区域'}}<i class="el-icon-arrow-down el-icon--right"></i>
+        </span>
+        <el-dropdown-menu slot="dropdown">
+          <el-dropdown-item command="">全部区域</el-dropdown-item>
+          <el-dropdown-item v-for="area in areas" :key="area" :command="area">
+            {{area}}
+          </el-dropdown-item>
+        </el-dropdown-menu>
+      </el-dropdown>
+    </div>
+    <div class="sort-item sort-action"
+         :class="{active: params.sortBy === 'distance'}"
+         @click="changeSort('distance')">
+      距离
+    </div>
+    <div class="sort-item sort-action"
+         :class="{active: params.sortBy === 'comments'}"
+         @click="changeSort('comments')">
+      人气
+    </div>
+    <div class="sort-item sort-action"
+         :class="{active: params.sortBy === 'score'}"
+         @click="changeSort('score')">
+      评分
+    </div>
+  </div>
+  <div class="shop-list" @scroll="onScroll">
+    <div class="shop-state" v-if="errorMessage && shops.length === 0">
+      <span>{{errorMessage}}</span>
+      <button type="button" class="retry-button" @click="retryQuery">
+        <i class="el-icon-refresh-right"></i>重试
+      </button>
+    </div>
+    <div class="shop-state" v-else-if="!isLoading && shops.length === 0">
+      暂无商户
+    </div>
+    <div class="shop-box" v-for="s in shops" :key="s.id" @click="toDetail(s.id)">
+      <div class="shop-img"><img :src="s.images" alt=""></div>
+      <div class="shop-info">
+        <div class="shop-title shop-item">{{s.name}}</div>
+        <div class="shop-rate shop-item" >
+          <el-rate
+              disabled v-model="s.score/10"
+              text-color="#F63"
+              show-score
+          ></el-rate>
+          <span>{{s.comments}}条</span>
+        </div>
+        <div class="shop-area shop-item">
+          <span>{{s.area}}</span>
+          <span v-if="s.distance">{{s.distance < 1000 ? s.distance.toFixed(1) + 'm' : (s.distance/1000).toFixed(1) + 'km'}}</span>
+        </div>
+        <div class="shop-avg shop-item">￥{{s.avgPrice}}/人</div>
+        <div class="shop-address shop-item">
+          <i class="el-icon-map-location"></i>
+          <span>{{s.address}}</span>
+        </div>
+      </div>
+    </div>
+    <div class="list-status" v-if="isLoading">
+      <i class="el-icon-loading"></i> 加载中
+    </div>
+    <div class="list-status error" v-else-if="errorMessage && shops.length > 0" @click="retryQuery">
+      {{errorMessage}}，点击重试
+    </div>
+    <div class="list-status" v-else-if="shops.length > 0 && !hasMore">
+      没有更多了
+    </div>
+  </div>
+</div>
+<script src="./js/vue.js"></script>
+<script src="./js/axios.min.js"></script>
+<!-- 引入组件库 -->
+<script src="./js/element.js"></script>
+<script src="./js/common.js"></script>
+<script>
+
+  const app = new Vue({
+    el: "#app",
+    data: {
+      util,
+      isLoading: false,
+      hasMore: true,
+      errorMessage: "",
+      queryVersion: 0,
+      types: [], // 类型列表
+      areas: [],
+      shops: [], // 商店列表
+      typeName: "",
+      selectedArea: "",
+      params:{
+        typeId: 0,
+        current: 1,
+        sortBy: "distance",
+        area: "",
+        x: 120.149993, // 经度
+        y: 30.334229 // 纬度
+      }
+    },
+    created() {
+      // 获取参数
+      this.params.typeId = util.getUrlParam("type");
+      this.typeName = util.getUrlParam("name");
+      // 查询类型
+      this.queryTypes();
+      this.queryAreas();
+      // 查询商店
+      this.queryShops();
+    },
+    mounted() {
+      window.addEventListener("resize", this.loadMoreIfNeeded);
+    },
+    beforeDestroy() {
+      window.removeEventListener("resize", this.loadMoreIfNeeded);
+    },
+    methods: {
+      queryTypes() {
+        axios.get("/shop-type/list")
+          .then(({data}) => {
+            this.types = data;
+          })
+          .catch(err => {
+            console.log(err);
+            this.$message.error(err)
+          })
+      },
+      queryAreas() {
+        axios.get("/shop/areas", {
+          params: {typeId: this.params.typeId}
+        })
+          .then(({data}) => {
+            this.areas = data || [];
+          })
+          .catch(err => {
+            this.$message.error(err)
+          })
+      },
+      queryShops() {
+        if (this.isLoading || !this.hasMore) {
+          return;
+        }
+        this.isLoading = true;
+        this.errorMessage = "";
+        const version = this.queryVersion;
+        axios.get("/shop/of/type", {
+            params: this.params
+          })
+          .then(({data}) => {
+            if (version !== this.queryVersion) {
+              return;
+            }
+            if (!data) {
+              this.hasMore = false;
+              return
+            }
+            data.forEach(s => s.images = s.images.split(',')[0]);
+            this.shops = this.shops.concat(data);
+            this.hasMore = data.length === 5;
+            if (this.hasMore) {
+              this.params.current++;
+            }
+          })
+          .catch(err => {
+            if (version === this.queryVersion) {
+              this.errorMessage = String(err || "商户加载失败");
+            }
+          })
+          .finally(() => {
+            if (version === this.queryVersion) {
+              this.isLoading = false;
+              this.$nextTick(() => this.loadMoreIfNeeded());
+            }
+          })
+      },
+      handleCommand(t) {
+        location.href = "/shop-list.html?type="+t.id+"&name="+t.name;
+      },
+      changeArea(area) {
+        this.selectedArea = area;
+        this.params.area = area;
+        this.resetAndQuery();
+      },
+      changeSort(sortBy) {
+        if (this.params.sortBy === sortBy) {
+          return;
+        }
+        this.params.sortBy = sortBy;
+        this.resetAndQuery();
+      },
+      resetAndQuery() {
+        this.queryVersion++;
+        this.params.current = 1;
+        this.shops = [];
+        this.hasMore = true;
+        this.isLoading = false;
+        this.errorMessage = "";
+        this.queryShops();
+      },
+      retryQuery() {
+        this.errorMessage = "";
+        this.queryShops();
+      },
+      goBack() {
+        history.back();
+      },
+      toDetail(id) {
+        location.href = "/shop-detail.html?id="+id
+      },
+      // 首屏不足以产生滚动条时继续加载，避免触底分页无法触发。
+      loadMoreIfNeeded() {
+        if (this.isLoading || !this.hasMore) {
+          return;
+        }
+        const list = this.$el.querySelector(".shop-list");
+        if (list && list.scrollHeight <= list.clientHeight + 2) {
+          this.queryShops();
+        }
+      },
+      onScroll(e) {
+        let scrollTop = e.target.scrollTop;
+        let clientHeight = e.target.clientHeight;
+        let scrollHeight = e.target.scrollHeight;
+        if (scrollTop + clientHeight >= scrollHeight - 2
+            && !this.isLoading && this.hasMore) {
+          this.queryShops();
+        }
+      },
+    }
+  })
+</script>
+</body>
+</html>

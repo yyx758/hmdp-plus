@@ -32,12 +32,12 @@ class SeckillVoucherStockInitializerTest {
 
         ReflectionTestUtils.setField(initializer, "seckillVoucherService", seckillVoucherService);
         ReflectionTestUtils.setField(initializer, "voucherService", voucherService);
-        ReflectionTestUtils.setField(initializer, "seckillVoucherRedisSynchronizer", redisSynchronizer);
-        ReflectionTestUtils.setField(initializer, "seckillVoucherBloomFilter", bloomFilter);
+        ReflectionTestUtils.setField(initializer, "redisSynchronizer", redisSynchronizer);
+        ReflectionTestUtils.setField(initializer, "bloomFilter", bloomFilter);
     }
 
     @Test
-    void restoresOnlyMissingRedisStockKeysAndRefreshesMetadata() {
+    void refreshesMetadataThenDelegatesStockAndOrderProjectionRecovery() {
         LocalDateTime beginTime = LocalDateTime.of(2026, 8, 4, 10, 0);
         LocalDateTime endTime = LocalDateTime.of(2026, 8, 4, 12, 0);
         SeckillVoucher first = new SeckillVoucher()
@@ -49,13 +49,10 @@ class SeckillVoucherStockInitializerTest {
         Voucher secondInfo = new Voucher().setId(3L).setShopId(11L).setStatus(2);
         Mockito.when(voucherService.listByIds(Arrays.asList(2L, 3L)))
                 .thenReturn(Arrays.asList(firstInfo, secondInfo));
-        Mockito.when(redisSynchronizer.initializeVoucher(first, firstInfo)).thenReturn(true);
-        Mockito.when(redisSynchronizer.initializeVoucher(second, secondInfo)).thenReturn(false);
-
-        initializer.restoreMissingStockKeys();
+        initializer.restoreRedisProjection();
 
         Mockito.verify(bloomFilter).initialize(Arrays.asList(2L, 3L));
-        Mockito.verify(redisSynchronizer).initializeVoucher(first, firstInfo);
-        Mockito.verify(redisSynchronizer).initializeVoucher(second, secondInfo);
+        Mockito.verify(redisSynchronizer).synchronizeMetadata(first, firstInfo);
+        Mockito.verify(redisSynchronizer).synchronizeMetadata(second, secondInfo);
     }
 }

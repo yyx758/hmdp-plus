@@ -131,6 +131,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         );
 
         UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
+        UserInfo userInfo = userInfoService.getById(user.getId());
+        userDTO.setCredits(userInfo == null || userInfo.getCredits() == null
+                ? 0 : userInfo.getCredits());
+        userDTO.setLevel(userInfo == null || userInfo.getLevel() == null
+                ? 0 : userInfo.getLevel());
         Map<String, Object> userMap = BeanUtil.beanToMap(userDTO, new HashMap<>(),
                 CopyOptions.create()
                         .setIgnoreNullValue(true)

@@ -4,14 +4,14 @@ import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.annotation.CacheConsistencyLock;
+import com.hmdp.cache.ShopBloomFilter;
 import com.hmdp.cache.ShopCacheInvalidationPublisher;
-import com.hmdp.cache.ShopLocalCache;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.Shop;
 import com.hmdp.enums.CacheLockMode;
 import com.hmdp.mapper.ShopMapper;
 import com.hmdp.service.IShopService;
-import com.hmdp.utils.CacheClient;
+import com.hmdp.service.IShopCacheService;
 import com.hmdp.utils.SystemConstants;
 import org.springframework.data.geo.Distance;
 import org.springframework.data.geo.GeoResult;
@@ -53,10 +53,10 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     private StringRedisTemplate stringRedisTemplate;
 
     @Resource
-    private CacheClient cacheClient;
+    private IShopCacheService shopCacheService;
 
     @Resource
-    private ShopLocalCache shopLocalCache;
+    private ShopBloomFilter shopBloomFilter;
 
     @Resource
     private ShopCacheInvalidationPublisher shopCacheInvalidationPublisher;
@@ -64,14 +64,8 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     @Override
     @CacheConsistencyLock(name = "shop", key = "#p0", mode = CacheLockMode.READ)
     public Result queryById(Long id) {
-        Shop localCacheHit = shopLocalCache.get(id);
-        if (localCacheHit != null) {
-            return Result.ok(localCacheHit);
-        }
-
         // 解决缓存穿透
-        Shop shop = cacheClient
-                .queryWithPassThrough(CACHE_SHOP_KEY, id, Shop.class, this::getById, CACHE_SHOP_TTL, TimeUnit.MINUTES);
+        Shop shop = shopCacheService.queryById(id, this::getById);
 
         // 互斥锁解决缓存击穿
         // Shop shop = cacheClient
@@ -85,7 +79,6 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
             return Result.fail("店铺不存在！");
         }
         // 7.返回
-        shopLocalCache.put(id, shop);
         return Result.ok(shop);
     }
 
@@ -98,6 +91,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         if (!save(shop)) {
             return Result.fail("店铺保存失败");
         }
+        shopBloomFilter.put(shop.getId());
         syncGeoIndex(null, shop);
         shopCacheInvalidationPublisher.publish(shop.getId());
         return Result.ok(shop.getId());

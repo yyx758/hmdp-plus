@@ -2,16 +2,23 @@ package com.hmdp.service.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.cache.SeckillVoucherBloomFilter;
+import com.hmdp.cache.SeckillVoucherLocalCacheInvalidationPublisher;
 import com.hmdp.dto.Result;
+import com.hmdp.dto.SeckillVoucherStockUpdateDTO;
 import com.hmdp.dto.SeckillVoucherUpdateDTO;
+import com.hmdp.dto.VoucherSubscribeBatchDTO;
 import com.hmdp.entity.SeckillVoucher;
 import com.hmdp.entity.Voucher;
 import com.hmdp.mapper.VoucherMapper;
+import com.hmdp.mapper.SeckillVoucherMapper;
+import com.hmdp.service.ISeckillReminderService;
+import com.hmdp.service.ISeckillSubscriptionService;
 import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherService;
 import com.hmdp.service.SeckillVoucherRedisSynchronizer;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -19,6 +26,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
 import java.util.List;
+
+import static com.hmdp.utils.RedisConstants.SECKILL_STOCK_KEY;
 
 /**
  * <p>
@@ -38,11 +47,36 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
     private SeckillVoucherRedisSynchronizer seckillVoucherRedisSynchronizer;
     @Resource
     private SeckillVoucherBloomFilter seckillVoucherBloomFilter;
+    @Resource
+    private SeckillVoucherLocalCacheInvalidationPublisher localCacheInvalidationPublisher;
+    @Resource
+    private SeckillVoucherMapper seckillVoucherMapper;
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
+    @Resource
+    private ISeckillSubscriptionService seckillSubscriptionService;
+    @Resource
+    private ISeckillReminderService seckillReminderService;
 
     @Override
     public Result queryVoucherOfShop(Long shopId) {
         // 查询优惠券信息
         List<Voucher> vouchers = getBaseMapper().queryVoucherOfShop(shopId);
+        if (stringRedisTemplate != null && vouchers != null) {
+            for (Voucher voucher : vouchers) {
+                if (voucher != null && Integer.valueOf(1).equals(voucher.getType())) {
+                    String stock = stringRedisTemplate.opsForValue()
+                            .get(SECKILL_STOCK_KEY + voucher.getId());
+                    if (stock != null) {
+                        try {
+                            voucher.setStock(Integer.valueOf(stock));
+                        } catch (NumberFormatException ignored) {
+                            // Redis库存异常时保留数据库查询值。
+                        }
+                    }
+                }
+            }
+        }
         // 返回结果
         return Result.ok(vouchers);
     }
@@ -72,6 +106,10 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                 () -> seckillVoucherRedisSynchronizer.deleteVoucher(seckillVoucher.getVoucherId()));
         seckillVoucherRedisSynchronizer.synchronizeNewVoucher(seckillVoucher, voucher);
         seckillVoucherBloomFilter.put(voucher.getId());
+        if (seckillReminderService != null) {
+            registerAfterCommit(() -> seckillReminderService.schedule(
+                    voucher.getId(), voucher.getBeginTime()));
+        }
     }
 
     @Override
@@ -133,7 +171,78 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                         rollbackMetadata, oldVoucher));
         seckillVoucherRedisSynchronizer.synchronizeMetadata(
                 updatedSeckillVoucher, updatedVoucherInfo);
+        localCacheInvalidationPublisher.publish(voucherId, "seckill-voucher-updated");
+        if (seckillReminderService != null) {
+            registerAfterCommit(() -> seckillReminderService.schedule(voucherId, beginTime));
+        }
         return Result.ok();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Result updateSeckillVoucherStock(SeckillVoucherStockUpdateDTO update) {
+        if (update == null || update.getVoucherId() == null
+                || update.getChangeStock() == null || update.getChangeStock() == 0) {
+            return Result.fail("优惠券ID和非零库存变化量不能为空");
+        }
+        Long voucherId = update.getVoucherId();
+        int changeStock = update.getChangeStock();
+        if (seckillVoucherMapper.selectById(voucherId) == null) {
+            return Result.fail("秒杀券不存在");
+        }
+        if (seckillVoucherMapper.adjustStock(voucherId, changeStock) != 1) {
+            return Result.fail("库存调整失败，调整后库存不能小于0");
+        }
+        Long redisStock = stringRedisTemplate.opsForValue()
+                .increment(SECKILL_STOCK_KEY + voucherId, changeStock);
+        if (redisStock == null || redisStock < 0) {
+            if (redisStock != null) {
+                stringRedisTemplate.opsForValue()
+                        .increment(SECKILL_STOCK_KEY + voucherId, -changeStock);
+            }
+            throw new IllegalStateException("Redis库存调整失败");
+        }
+        registerRollbackCompensation(() -> stringRedisTemplate.opsForValue()
+                .increment(SECKILL_STOCK_KEY + voucherId, -changeStock));
+        return Result.ok(redisStock);
+    }
+
+    @Override
+    public Result subscribe(Long voucherId) {
+        if (voucherId == null) {
+            return Result.fail("优惠券ID不能为空");
+        }
+        seckillSubscriptionService.subscribe(
+                voucherId, com.hmdp.utils.UserHolder.getUser().getId());
+        return Result.ok();
+    }
+
+    @Override
+    public Result unsubscribe(Long voucherId) {
+        if (voucherId == null) {
+            return Result.fail("优惠券ID不能为空");
+        }
+        seckillSubscriptionService.unsubscribe(
+                voucherId, com.hmdp.utils.UserHolder.getUser().getId());
+        return Result.ok();
+    }
+
+    @Override
+    public Result getSubscribeStatus(Long voucherId) {
+        if (voucherId == null) {
+            return Result.fail("优惠券ID不能为空");
+        }
+        return Result.ok(seckillSubscriptionService.getSubscribeStatus(
+                voucherId, com.hmdp.utils.UserHolder.getUser().getId()));
+    }
+
+    @Override
+    public Result getSubscribeStatusBatch(VoucherSubscribeBatchDTO request) {
+        if (request == null || request.getVoucherIdList() == null) {
+            return Result.fail("优惠券ID集合不能为空");
+        }
+        return Result.ok(seckillSubscriptionService.getSubscribeStatusBatch(
+                request.getVoucherIdList(), com.hmdp.utils.UserHolder.getUser().getId()));
     }
 
     private Voucher buildVoucherPatch(SeckillVoucherUpdateDTO update) {
@@ -184,6 +293,27 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                     compensation.run();
                 } catch (RuntimeException e) {
                     log.error("秒杀券事务回滚后恢复Redis数据失败，需要人工核对", e);
+                }
+            }
+        });
+    }
+
+    private void registerAfterCommit(Runnable action) {
+        if (action == null) {
+            return;
+        }
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            action.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    action.run();
+                } catch (RuntimeException e) {
+                    log.error("秒杀事务提交后的营销任务执行失败", e);
                 }
             }
         });

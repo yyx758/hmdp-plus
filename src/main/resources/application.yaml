@@ -63,6 +63,14 @@ hmdp:
         enabled: ${HMDP_SHOP_LOCAL_CACHE_ENABLED:true}
         maximum-size: ${HMDP_SHOP_LOCAL_CACHE_MAXIMUM_SIZE:10000}
         expire-after-write-seconds: ${HMDP_SHOP_LOCAL_CACHE_EXPIRE_SECONDS:60}
+      redis-ttl-minutes: ${HMDP_SHOP_CACHE_REDIS_TTL_MINUTES:30}
+      null-ttl-seconds: ${HMDP_SHOP_CACHE_NULL_TTL_SECONDS:120}
+      rebuild:
+        wait-millis: ${HMDP_SHOP_CACHE_REBUILD_WAIT_MILLIS:3000}
+        lease-millis: ${HMDP_SHOP_CACHE_REBUILD_LEASE_MILLIS:10000}
+      bloom:
+        expected-insertions: ${HMDP_SHOP_BLOOM_EXPECTED_INSERTIONS:100000}
+        false-probability: ${HMDP_SHOP_BLOOM_FALSE_PROBABILITY:0.01}
     seckill-voucher:
       local:
         enabled: ${HMDP_SECKILL_LOCAL_CACHE_ENABLED:true}
@@ -81,6 +89,47 @@ hmdp:
         expected-insertions: ${HMDP_SECKILL_BLOOM_EXPECTED_INSERTIONS:100000}
         false-probability: ${HMDP_SECKILL_BLOOM_FALSE_PROBABILITY:0.01}
   kafka:
+    seckill-order:
+      topic: ${HMDP_SECKILL_ORDER_TOPIC:hmdp.seckill-order.v1}
+      dlt-topic: ${HMDP_SECKILL_ORDER_DLT_TOPIC:hmdp.seckill-order.v1.DLT}
+      consumer-group: ${HMDP_SECKILL_ORDER_CONSUMER_GROUP:${spring.application.name}-seckill-order}
+      dlt-consumer-group: ${HMDP_SECKILL_ORDER_DLT_CONSUMER_GROUP:${spring.application.name}-seckill-order-dlt}
+      partitions: ${HMDP_SECKILL_ORDER_PARTITIONS:6}
+      replicas: ${HMDP_SECKILL_ORDER_REPLICAS:3}
+      min-in-sync-replicas: ${HMDP_SECKILL_ORDER_MIN_IN_SYNC_REPLICAS:2}
+      consumer-concurrency: ${HMDP_SECKILL_ORDER_CONSUMER_CONCURRENCY:6}
+      consumer-max-poll-records: ${HMDP_SECKILL_ORDER_CONSUMER_MAX_POLL_RECORDS:100}
+      retry-attempts: ${HMDP_SECKILL_ORDER_RETRY_ATTEMPTS:3}
+      retry-backoff-ms: ${HMDP_SECKILL_ORDER_RETRY_BACKOFF_MS:1000}
+      dlt-send-timeout-seconds: ${HMDP_SECKILL_ORDER_DLT_SEND_TIMEOUT_SECONDS:10}
+      outbox:
+        poll-delay-ms: ${HMDP_SECKILL_ORDER_OUTBOX_POLL_DELAY_MS:100}
+        batch-size: ${HMDP_SECKILL_ORDER_OUTBOX_BATCH_SIZE:100}
+        accept-batch-size: ${HMDP_SECKILL_ORDER_OUTBOX_ACCEPT_BATCH_SIZE:100}
+        accept-batch-window-micros: ${HMDP_SECKILL_ORDER_OUTBOX_ACCEPT_BATCH_WINDOW_MICROS:1000}
+        accept-queue-capacity: ${HMDP_SECKILL_ORDER_OUTBOX_ACCEPT_QUEUE_CAPACITY:4096}
+        accept-timeout-ms: ${HMDP_SECKILL_ORDER_OUTBOX_ACCEPT_TIMEOUT_MS:5000}
+        accept-writer-count: ${HMDP_SECKILL_ORDER_OUTBOX_ACCEPT_WRITER_COUNT:1}
+        send-timeout-seconds: ${HMDP_SECKILL_ORDER_OUTBOX_SEND_TIMEOUT_SECONDS:10}
+        relay-lease-seconds: ${HMDP_SECKILL_ORDER_OUTBOX_RELAY_LEASE_SECONDS:30}
+        sent-recheck-seconds: ${HMDP_SECKILL_ORDER_OUTBOX_SENT_RECHECK_SECONDS:60}
+        initial-backoff-seconds: ${HMDP_SECKILL_ORDER_OUTBOX_INITIAL_BACKOFF_SECONDS:1}
+        max-backoff-seconds: ${HMDP_SECKILL_ORDER_OUTBOX_MAX_BACKOFF_SECONDS:300}
+      handoff:
+        batch-size: ${HMDP_SECKILL_ORDER_HANDOFF_BATCH_SIZE:100}
+        idle-poll-ms: ${HMDP_SECKILL_ORDER_HANDOFF_IDLE_POLL_MS:20}
+        failure-backoff-initial-ms: ${HMDP_SECKILL_ORDER_HANDOFF_FAILURE_BACKOFF_INITIAL_MS:100}
+        failure-backoff-max-ms: ${HMDP_SECKILL_ORDER_HANDOFF_FAILURE_BACKOFF_MAX_MS:5000}
+        relay-lease-seconds: ${HMDP_SECKILL_ORDER_HANDOFF_RELAY_LEASE_SECONDS:15}
+        voucher-refresh-seconds: ${HMDP_SECKILL_ORDER_HANDOFF_VOUCHER_REFRESH_SECONDS:60}
+      accepted-order-recovery:
+        poll-delay-ms: ${HMDP_SECKILL_ORDER_COMPENSATION_POLL_DELAY_MS:5000}
+      reconciliation:
+        cron: "${HMDP_SECKILL_ORDER_RECONCILIATION_CRON:0 0 2,8,14,20 * * ?}"
+        zone: ${HMDP_SECKILL_ORDER_RECONCILIATION_ZONE:Asia/Shanghai}
+        full-lease-seconds: ${HMDP_SECKILL_ORDER_RECONCILIATION_FULL_LEASE_SECONDS:3600}
+        recovery-lease-seconds: ${HMDP_SECKILL_ORDER_RECOVERY_LEASE_SECONDS:300}
+        redis-user-batch-size: ${HMDP_SECKILL_ORDER_RECONCILIATION_REDIS_USER_BATCH_SIZE:500}
     shop-cache:
       topic: ${HMDP_SHOP_CACHE_INVALIDATION_TOPIC:hmdp.shop.cache-invalidation.v1}
       dlt-topic: ${HMDP_SHOP_CACHE_INVALIDATION_DLT_TOPIC:hmdp.shop.cache-invalidation.v1.DLT}
@@ -101,22 +150,74 @@ hmdp:
         max-auto-retries: ${HMDP_SHOP_CACHE_OUTBOX_MAX_AUTO_RETRIES:12}
         initial-backoff-seconds: ${HMDP_SHOP_CACHE_OUTBOX_INITIAL_BACKOFF_SECONDS:1}
         max-backoff-seconds: ${HMDP_SHOP_CACHE_OUTBOX_MAX_BACKOFF_SECONDS:300}
+    seckill-voucher-cache:
+      topic: ${HMDP_SECKILL_VOUCHER_CACHE_TOPIC:hmdp.seckill-voucher.l1-invalidation.v1}
+      dlt-topic: ${HMDP_SECKILL_VOUCHER_CACHE_DLT_TOPIC:hmdp.seckill-voucher.l1-invalidation.v1.DLT}
+      consumer-group: ${HMDP_SECKILL_VOUCHER_CACHE_CONSUMER_GROUP:${spring.application.name}-seckill-voucher-l1-${random.uuid}}
+      partitions: ${HMDP_SECKILL_VOUCHER_CACHE_PARTITIONS:3}
+      replicas: ${HMDP_SECKILL_VOUCHER_CACHE_REPLICAS:3}
+      min-in-sync-replicas: ${HMDP_SECKILL_VOUCHER_CACHE_MIN_IN_SYNC_REPLICAS:2}
+      consumer-concurrency: ${HMDP_SECKILL_VOUCHER_CACHE_CONSUMER_CONCURRENCY:1}
+      retry-attempts: ${HMDP_SECKILL_VOUCHER_CACHE_RETRY_ATTEMPTS:3}
+      retry-backoff-ms: ${HMDP_SECKILL_VOUCHER_CACHE_RETRY_BACKOFF_MS:1000}
+      dlt-send-timeout-seconds: ${HMDP_SECKILL_VOUCHER_CACHE_DLT_SEND_TIMEOUT_SECONDS:10}
+      outbox:
+        poll-delay-ms: ${HMDP_SECKILL_VOUCHER_CACHE_OUTBOX_POLL_DELAY_MS:200}
+        batch-size: ${HMDP_SECKILL_VOUCHER_CACHE_OUTBOX_BATCH_SIZE:100}
+        send-timeout-seconds: ${HMDP_SECKILL_VOUCHER_CACHE_OUTBOX_SEND_TIMEOUT_SECONDS:10}
+        max-auto-retries: ${HMDP_SECKILL_VOUCHER_CACHE_OUTBOX_MAX_AUTO_RETRIES:12}
+        initial-backoff-seconds: ${HMDP_SECKILL_VOUCHER_CACHE_OUTBOX_INITIAL_BACKOFF_SECONDS:1}
+        max-backoff-seconds: ${HMDP_SECKILL_VOUCHER_CACHE_OUTBOX_MAX_BACKOFF_SECONDS:300}
   seckill:
-    consumer:
-      worker-count: ${HMDP_SECKILL_CONSUMER_WORKER_COUNT:8}
-      batch-size: ${HMDP_SECKILL_CONSUMER_BATCH_SIZE:100}
-      instance-id: ${HMDP_SECKILL_CONSUMER_INSTANCE_ID:${server.port}}
-      # 独立池专供Stream读取，至少要覆盖全部阻塞读取线程
-      stream-read-pool-max-active: ${HMDP_SECKILL_STREAM_READ_POOL_MAX_ACTIVE:12}
-  redisson:
-    client2:
-      host: ${HMDP_REDISSON_CLIENT2_HOST:127.0.0.1}
-      port: ${HMDP_REDISSON_CLIENT2_PORT:6381}
-      password: ${HMDP_REDISSON_CLIENT2_PASSWORD:123456}
-    client3:
-      host: ${HMDP_REDISSON_CLIENT3_HOST:127.0.0.1}
-      port: ${HMDP_REDISSON_CLIENT3_PORT:6382}
-      password: ${HMDP_REDISSON_CLIENT3_PASSWORD:123456}
+    acceptance-mode: ${HMDP_SECKILL_ACCEPTANCE_MODE:redis-handoff}
+    order-id:
+      mode: ${HMDP_SECKILL_ORDER_ID_MODE:db-segment}
+      segment-step: ${HMDP_SECKILL_ORDER_ID_SEGMENT_STEP:10000}
+      prefetch-percent: ${HMDP_SECKILL_ORDER_ID_PREFETCH_PERCENT:20}
+    access-token:
+      enabled: ${HMDP_SECKILL_ACCESS_TOKEN_ENABLED:true}
+      ttl-seconds: ${HMDP_SECKILL_ACCESS_TOKEN_TTL_SECONDS:30}
+    rate-limit:
+      enabled: ${HMDP_SECKILL_RATE_LIMIT_ENABLED:true}
+      trust-forwarded-headers: ${HMDP_SECKILL_RATE_LIMIT_TRUST_FORWARDED_HEADERS:false}
+      vip-min-level: ${HMDP_SECKILL_RATE_LIMIT_VIP_MIN_LEVEL:1}
+      high-value-min-credits: ${HMDP_SECKILL_RATE_LIMIT_HIGH_VALUE_MIN_CREDITS:1000}
+      vip-capacity-multiplier: ${HMDP_SECKILL_RATE_LIMIT_VIP_MULTIPLIER:2.0}
+      high-value-capacity-multiplier: ${HMDP_SECKILL_RATE_LIMIT_HIGH_VALUE_MULTIPLIER:3.0}
+      issue-seckill-access-token:
+        ip-window-millis: ${HMDP_SECKILL_ISSUE_ACCESS_TOKEN_IP_WINDOW_MILLIS:1000}
+        ip-capacity: ${HMDP_SECKILL_ISSUE_ACCESS_TOKEN_IP_CAPACITY:200}
+        user-window-millis: ${HMDP_SECKILL_ISSUE_ACCESS_TOKEN_USER_WINDOW_MILLIS:1000}
+        user-capacity: ${HMDP_SECKILL_ISSUE_ACCESS_TOKEN_USER_CAPACITY:2}
+      seckill-order:
+        ip-window-millis: ${HMDP_SECKILL_ORDER_IP_WINDOW_MILLIS:1000}
+        ip-capacity: ${HMDP_SECKILL_ORDER_IP_CAPACITY:200}
+        user-window-millis: ${HMDP_SECKILL_ORDER_USER_WINDOW_MILLIS:1000}
+        user-capacity: ${HMDP_SECKILL_ORDER_USER_CAPACITY:2}
+      adaptive:
+        enabled: ${HMDP_SECKILL_ADAPTIVE_RATE_LIMIT_ENABLED:true}
+        refresh-millis: ${HMDP_SECKILL_ADAPTIVE_REFRESH_MILLIS:1000}
+        warning-backlog: ${HMDP_SECKILL_WARNING_BACKLOG:1000}
+        critical-backlog: ${HMDP_SECKILL_CRITICAL_BACKLOG:5000}
+        warning-multiplier: ${HMDP_SECKILL_WARNING_MULTIPLIER:0.5}
+        critical-multiplier: ${HMDP_SECKILL_CRITICAL_MULTIPLIER:0.1}
+    marketing:
+      enabled: ${HMDP_SECKILL_MARKETING_ENABLED:true}
+      subscription-grace-seconds: ${HMDP_SECKILL_SUBSCRIPTION_GRACE_SECONDS:86400}
+      auto-issue-batch-size: ${HMDP_SECKILL_AUTO_ISSUE_BATCH_SIZE:20}
+      top-buyer-retention-days: ${HMDP_SECKILL_TOP_BUYER_RETENTION_DAYS:30}
+      reminder:
+        enabled: ${HMDP_SECKILL_REMINDER_ENABLED:true}
+        lead-seconds: ${HMDP_SECKILL_REMINDER_LEAD_SECONDS:120}
+        max-audience: ${HMDP_SECKILL_REMINDER_MAX_AUDIENCE:500}
+        top-buyer-days: ${HMDP_SECKILL_REMINDER_TOP_BUYER_DAYS:30}
+        top-buyer-count: ${HMDP_SECKILL_REMINDER_TOP_BUYER_COUNT:200}
+        vip-min-level: ${HMDP_SECKILL_REMINDER_VIP_MIN_LEVEL:1}
+        vip-count: ${HMDP_SECKILL_REMINDER_VIP_COUNT:200}
+      notification:
+        retention-days: ${HMDP_NOTIFICATION_RETENTION_DAYS:30}
+        max-items: ${HMDP_NOTIFICATION_MAX_ITEMS:100}
+        dedup-seconds: ${HMDP_NOTIFICATION_DEDUP_SECONDS:300}
 mybatis-plus:
   type-aliases-package: com.hmdp.entity # 别名扫描包
 logging:

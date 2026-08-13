@@ -1,6 +1,7 @@
 package com.hmdp.service;
 
 import com.hmdp.cache.SeckillVoucherBloomFilter;
+import com.hmdp.cache.SeckillVoucherLocalCacheInvalidationPublisher;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.SeckillVoucherUpdateDTO;
 import com.hmdp.entity.SeckillVoucher;
@@ -24,6 +25,7 @@ class VoucherServiceImplTest {
     private ISeckillVoucherService seckillVoucherService;
     private SeckillVoucherRedisSynchronizer redisSynchronizer;
     private SeckillVoucherBloomFilter bloomFilter;
+    private SeckillVoucherLocalCacheInvalidationPublisher localCacheInvalidationPublisher;
 
     @BeforeEach
     void setUp() {
@@ -32,10 +34,14 @@ class VoucherServiceImplTest {
         seckillVoucherService = Mockito.mock(ISeckillVoucherService.class);
         redisSynchronizer = Mockito.mock(SeckillVoucherRedisSynchronizer.class);
         bloomFilter = Mockito.mock(SeckillVoucherBloomFilter.class);
+        localCacheInvalidationPublisher =
+                Mockito.mock(SeckillVoucherLocalCacheInvalidationPublisher.class);
         ReflectionTestUtils.setField(voucherService, "baseMapper", voucherMapper);
         ReflectionTestUtils.setField(voucherService, "seckillVoucherService", seckillVoucherService);
         ReflectionTestUtils.setField(voucherService, "seckillVoucherRedisSynchronizer", redisSynchronizer);
         ReflectionTestUtils.setField(voucherService, "seckillVoucherBloomFilter", bloomFilter);
+        ReflectionTestUtils.setField(
+                voucherService, "localCacheInvalidationPublisher", localCacheInvalidationPublisher);
     }
 
     @Test
@@ -107,6 +113,8 @@ class VoucherServiceImplTest {
         ArgumentCaptor<Voucher> voucherCaptor = ArgumentCaptor.forClass(Voucher.class);
         Mockito.verify(redisSynchronizer).synchronizeMetadata(
                 captor.capture(), voucherCaptor.capture());
+        Mockito.verify(localCacheInvalidationPublisher)
+                .publish(2L, "seckill-voucher-updated");
         org.junit.jupiter.api.Assertions.assertNull(captor.getValue().getStock());
         org.junit.jupiter.api.Assertions.assertEquals(newEnd, captor.getValue().getEndTime());
         org.junit.jupiter.api.Assertions.assertEquals(2L, voucherCaptor.getValue().getId());

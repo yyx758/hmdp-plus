@@ -34,7 +34,17 @@ build/
 
 ### Local runtime and benchmark artifacts ###
 .codex-tmp/
+.firecrawl/
+nginx-1.18.0/logs/
+nginx-1.18.0/temp/
 .env
 *.jtl
+load-tests/jmeter/results/*.log
+load-tests/jmeter/results/*-report*/
 aggregate.csv
 apifox-seckill-users.csv
+jmeter.log
+nginx-1.18.0/nginx.exe
+nginx-1.18.0/conf/*.backup
+load-tests/jmeter/results/*.xml
+load-tests/jmeter/results/*.md

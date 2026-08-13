@@ -2,13 +2,12 @@ package com.hmdp.service;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.hmdp.cache.ShopBloomFilter;
 import com.hmdp.cache.ShopCacheInvalidationPublisher;
-import com.hmdp.cache.ShopLocalCache;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.Shop;
 import com.hmdp.mapper.ShopMapper;
 import com.hmdp.service.impl.ShopServiceImpl;
-import com.hmdp.utils.CacheClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -38,8 +37,8 @@ class ShopServiceQueryTest {
     private ShopMapper shopMapper;
     private StringRedisTemplate redisTemplate;
     private GeoOperations<String, String> geoOperations;
-    private CacheClient cacheClient;
-    private ShopLocalCache shopLocalCache;
+    private IShopCacheService shopCacheService;
+    private ShopBloomFilter shopBloomFilter;
     private ShopCacheInvalidationPublisher cacheInvalidationPublisher;
 
     @BeforeEach
@@ -49,49 +48,48 @@ class ShopServiceQueryTest {
         shopMapper = Mockito.mock(ShopMapper.class);
         redisTemplate = Mockito.mock(StringRedisTemplate.class);
         geoOperations = Mockito.mock(GeoOperations.class);
-        cacheClient = Mockito.mock(CacheClient.class);
-        shopLocalCache = Mockito.mock(ShopLocalCache.class);
+        shopCacheService = Mockito.mock(IShopCacheService.class);
+        shopBloomFilter = Mockito.mock(ShopBloomFilter.class);
         cacheInvalidationPublisher = Mockito.mock(ShopCacheInvalidationPublisher.class);
 
         Mockito.when(redisTemplate.opsForGeo()).thenReturn(geoOperations);
         ReflectionTestUtils.setField(shopService, "baseMapper", shopMapper);
         ReflectionTestUtils.setField(shopService, "stringRedisTemplate", redisTemplate);
-        ReflectionTestUtils.setField(shopService, "cacheClient", cacheClient);
-        ReflectionTestUtils.setField(shopService, "shopLocalCache", shopLocalCache);
+        ReflectionTestUtils.setField(shopService, "shopCacheService", shopCacheService);
+        ReflectionTestUtils.setField(shopService, "shopBloomFilter", shopBloomFilter);
         ReflectionTestUtils.setField(shopService, "shopCacheInvalidationPublisher", cacheInvalidationPublisher);
     }
 
     @Test
     void returnsShopFromCaffeineWithoutReadingRedisL2() {
         Shop cached = new Shop().setId(1L).setName("local-cache");
-        Mockito.when(shopLocalCache.get(1L)).thenReturn(cached);
+        Mockito.when(shopCacheService.queryById(
+                        Mockito.eq(1L), Mockito.<Function<Long, Shop>>any()))
+                .thenReturn(cached);
 
         Result result = shopService.queryById(1L);
 
         assertTrue(result.getSuccess());
         assertEquals(cached, result.getData());
-        Mockito.verifyNoInteractions(cacheClient);
+        Mockito.verify(shopCacheService).queryById(
+                Mockito.eq(1L), Mockito.<Function<Long, Shop>>any());
     }
 
     @Test
     @SuppressWarnings("unchecked")
     void fillsCaffeineAfterReadingRedisL2OrDatabase() {
         Shop cached = new Shop().setId(2L).setName("redis-or-db");
-        Mockito.when(shopLocalCache.get(2L)).thenReturn(null);
-        Mockito.when(cacheClient.queryWithPassThrough(
-                        Mockito.eq("cache:shop:"),
+        Mockito.when(shopCacheService.queryById(
                         Mockito.eq(2L),
-                        Mockito.eq(Shop.class),
-                        Mockito.<Function<Long, Shop>>any(),
-                        Mockito.eq(30L),
-                        Mockito.eq(TimeUnit.MINUTES)))
+                        Mockito.<Function<Long, Shop>>any()))
                 .thenReturn(cached);
 
         Result result = shopService.queryById(2L);
 
         assertTrue(result.getSuccess());
         assertEquals(cached, result.getData());
-        Mockito.verify(shopLocalCache).put(2L, cached);
+        Mockito.verify(shopCacheService).queryById(
+                Mockito.eq(2L), Mockito.<Function<Long, Shop>>any());
     }
 
     @Test

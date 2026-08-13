@@ -6,3 +6,4 @@ target
 *.iml
 *.log
 docs
+nginx-1.18.0

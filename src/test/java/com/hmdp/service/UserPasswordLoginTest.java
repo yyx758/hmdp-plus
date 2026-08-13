@@ -6,6 +6,7 @@ import com.hmdp.dto.PasswordUpdateDTO;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.User;
+import com.hmdp.entity.UserInfo;
 import com.hmdp.mapper.UserMapper;
 import com.hmdp.service.impl.UserServiceImpl;
 import com.hmdp.utils.UserHolder;
@@ -35,6 +36,7 @@ class UserPasswordLoginTest {
     private StringRedisTemplate redisTemplate;
     private HashOperations<String, Object, Object> hashOperations;
     private ValueOperations<String, String> valueOperations;
+    private IUserInfoService userInfoService;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
@@ -44,12 +46,14 @@ class UserPasswordLoginTest {
         redisTemplate = Mockito.mock(StringRedisTemplate.class);
         hashOperations = Mockito.mock(HashOperations.class);
         valueOperations = Mockito.mock(ValueOperations.class);
+        userInfoService = Mockito.mock(IUserInfoService.class);
 
         Mockito.when(redisTemplate.opsForHash()).thenReturn(hashOperations);
         Mockito.when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         Mockito.when(valueOperations.get(Mockito.anyString())).thenReturn("sms-code");
         ReflectionTestUtils.setField(userService, "baseMapper", userMapper);
         ReflectionTestUtils.setField(userService, "stringRedisTemplate", redisTemplate);
+        ReflectionTestUtils.setField(userService, "userInfoService", userInfoService);
 
         UserDTO currentUser = new UserDTO();
         currentUser.setId(9L);
@@ -69,6 +73,8 @@ class UserPasswordLoginTest {
         user.setNickName("密码用户");
         user.setPassword(BCrypt.hashpw("correct-pass", BCrypt.gensalt()));
         Mockito.when(userMapper.selectOne(Mockito.any())).thenReturn(user);
+        Mockito.when(userInfoService.getById(9L)).thenReturn(
+                new UserInfo().setUserId(9L).setLevel(2).setCredits(1500));
 
         LoginFormDTO form = new LoginFormDTO();
         form.setPhone("13800138000");
@@ -86,15 +92,17 @@ class UserPasswordLoginTest {
                 LOGIN_USER_TTL,
                 TimeUnit.MINUTES
         );
-        Mockito.verify(hashOperations).putAll(
-                Mockito.eq(LOGIN_USER_KEY + token),
-                Mockito.anyMap()
-        );
         Mockito.verify(redisTemplate).expire(
                 LOGIN_USER_KEY + token,
                 LOGIN_USER_TTL,
                 TimeUnit.MINUTES
         );
+        ArgumentCaptor<java.util.Map<String, Object>> userMapCaptor =
+                ArgumentCaptor.forClass(java.util.Map.class);
+        Mockito.verify(hashOperations).putAll(
+                Mockito.eq(LOGIN_USER_KEY + token), userMapCaptor.capture());
+        assertEquals("2", userMapCaptor.getValue().get("level"));
+        assertEquals("1500", userMapCaptor.getValue().get("credits"));
     }
 
     @Test

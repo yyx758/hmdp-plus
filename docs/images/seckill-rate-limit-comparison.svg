@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="650" viewBox="0 0 1200 650" role="img" aria-labelledby="title desc">
+  <title id="title">真实秒杀下单接口三种限流方案压测对比</title>
+  <desc id="desc">左侧对比正常订单P50、P95、P99响应时间，右侧对比Redis命令增量。Nginx加Redis分层限流具有最低的P50、P95和Redis命令量。</desc>
+  <rect width="1200" height="650" fill="#ffffff"/>
+  <text x="60" y="52" font-family="Microsoft YaHei, sans-serif" font-size="28" font-weight="600" fill="#172033">真实秒杀下单接口三方压测</text>
+  <text x="60" y="82" font-family="Microsoft YaHei, sans-serif" font-size="15" fill="#64748b">3000 QPS 攻击流量 + 约 10 QPS 正常流量，持续 30 秒</text>
+
+  <g font-family="Microsoft YaHei, sans-serif">
+    <text x="60" y="130" font-size="20" font-weight="600" fill="#172033">正常订单响应时间</text>
+    <rect x="60" y="150" width="12" height="12" rx="2" fill="#3478f6"/>
+    <text x="80" y="161" font-size="14" fill="#334155">P50</text>
+    <rect x="126" y="150" width="12" height="12" rx="2" fill="#f08a24"/>
+    <text x="146" y="161" font-size="14" fill="#334155">P95</text>
+    <rect x="192" y="150" width="12" height="12" rx="2" fill="#18a875"/>
+    <text x="212" y="161" font-size="14" fill="#334155">P99</text>
+
+    <line x1="78" y1="190" x2="78" y2="500" stroke="#94a3b8" stroke-width="1"/>
+    <line x1="78" y1="500" x2="570" y2="500" stroke="#94a3b8" stroke-width="1"/>
+    <g stroke="#e2e8f0" stroke-width="1">
+      <line x1="78" y1="412" x2="570" y2="412"/>
+      <line x1="78" y1="324" x2="570" y2="324"/>
+      <line x1="78" y1="236" x2="570" y2="236"/>
+    </g>
+    <g font-size="13" fill="#64748b" text-anchor="end">
+      <text x="68" y="505">0</text>
+      <text x="68" y="417">100</text>
+      <text x="68" y="329">200</text>
+      <text x="68" y="241">300 ms</text>
+    </g>
+
+    <g>
+      <rect x="130" y="495" width="24" height="5" rx="2" fill="#3478f6"/>
+      <rect x="158" y="454" width="24" height="46" rx="2" fill="#f08a24"/>
+      <rect x="186" y="434" width="24" height="66" rx="2" fill="#18a875"/>
+      <g font-size="13" fill="#172033" text-anchor="middle">
+        <text x="142" y="486">6</text><text x="170" y="446">52</text><text x="198" y="426">75</text>
+      </g>
+      <text x="170" y="528" font-size="14" fill="#334155" text-anchor="middle">完全无限流</text>
+    </g>
+
+    <g>
+      <rect x="284" y="489" width="24" height="11" rx="2" fill="#3478f6"/>
+      <rect x="312" y="357" width="24" height="143" rx="2" fill="#f08a24"/>
+      <rect x="340" y="214" width="24" height="286" rx="2" fill="#18a875"/>
+      <g font-size="13" fill="#172033" text-anchor="middle">
+        <text x="296" y="480">12</text><text x="324" y="349">162</text><text x="352" y="206">324</text>
+      </g>
+      <text x="324" y="528" font-size="14" fill="#334155" text-anchor="middle">仅 Redis</text>
+    </g>
+
+    <g>
+      <rect x="438" y="496" width="24" height="4" rx="2" fill="#3478f6"/>
+      <rect x="466" y="481" width="24" height="19" rx="2" fill="#f08a24"/>
+      <rect x="494" y="413" width="24" height="87" rx="2" fill="#18a875"/>
+      <g font-size="13" fill="#172033" text-anchor="middle">
+        <text x="450" y="487">5</text><text x="478" y="473">22</text><text x="506" y="405">99</text>
+      </g>
+      <text x="478" y="528" font-size="14" fill="#334155" text-anchor="middle">Nginx + Redis</text>
+    </g>
+
+    <text x="650" y="130" font-size="20" font-weight="600" fill="#172033">Redis 命令增量</text>
+    <line x1="670" y1="190" x2="670" y2="500" stroke="#94a3b8" stroke-width="1"/>
+    <line x1="670" y1="500" x2="1140" y2="500" stroke="#94a3b8" stroke-width="1"/>
+    <g stroke="#e2e8f0" stroke-width="1">
+      <line x1="670" y1="422" x2="1140" y2="422"/>
+      <line x1="670" y1="345" x2="1140" y2="345"/>
+      <line x1="670" y1="267" x2="1140" y2="267"/>
+      <line x1="670" y1="190" x2="1140" y2="190"/>
+    </g>
+    <g font-size="13" fill="#64748b" text-anchor="end">
+      <text x="660" y="505">0</text>
+      <text x="660" y="427">40</text>
+      <text x="660" y="350">80</text>
+      <text x="660" y="272">120</text>
+      <text x="660" y="195">160 万</text>
+    </g>
+
+    <g fill="#3478f6">
+      <rect x="726" y="355" width="90" height="145" rx="4"/>
+      <rect x="870" y="207" width="90" height="293" rx="4"/>
+      <rect x="1014" y="465" width="90" height="35" rx="4"/>
+    </g>
+    <g font-size="14" fill="#172033" text-anchor="middle">
+      <text x="771" y="345">74.7 万</text>
+      <text x="915" y="197">151.3 万</text>
+      <text x="1059" y="455">18.2 万</text>
+      <text x="771" y="528" fill="#334155">完全无限流</text>
+      <text x="915" y="528" fill="#334155">仅 Redis</text>
+      <text x="1059" y="528" fill="#334155">Nginx + Redis</text>
+    </g>
+
+    <rect x="60" y="574" width="1080" height="48" rx="8" fill="#f1f5f9"/>
+    <text x="80" y="604" font-size="16" fill="#334155">分层限流在 Nginx 拒绝 83,180 个攻击请求，Redis 命令量只有“仅 Redis”方案的约 12%，正常订单 P95 降低到 22 ms。</text>
+  </g>
+</svg>

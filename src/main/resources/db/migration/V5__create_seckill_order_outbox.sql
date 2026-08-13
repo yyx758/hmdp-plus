@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS `tb_seckill_order_outbox` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `event_id` varchar(64) NOT NULL,
+  `order_id` bigint NOT NULL,
+  `voucher_id` bigint NOT NULL,
+  `user_id` bigint NOT NULL,
+  `auto_issued` tinyint(1) NOT NULL DEFAULT 0,
+  `status` varchar(32) NOT NULL,
+  `retry_count` int NOT NULL DEFAULT 0,
+  `next_retry_time` datetime NOT NULL,
+  `last_error` varchar(500) DEFAULT NULL,
+  `created_time` datetime NOT NULL,
+  `updated_time` datetime NOT NULL,
+  `sent_time` datetime DEFAULT NULL,
+  `completed_time` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_seckill_order_outbox_event_id` (`event_id`),
+  UNIQUE KEY `uk_seckill_order_outbox_order_id` (`order_id`),
+  KEY `idx_seckill_order_outbox_dispatch` (`status`, `next_retry_time`, `id`),
+  KEY `idx_seckill_order_outbox_user` (`user_id`, `order_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='秒杀订单Kafka可靠投递与处理状态';

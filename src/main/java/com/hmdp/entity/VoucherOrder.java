@@ -1,6 +1,7 @@
 package com.hmdp.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -76,6 +77,12 @@ public class VoucherOrder implements Serializable {
      * 更新时间
      */
     private LocalDateTime updateTime;
+
+    /**
+     * 仅用于 Kafka 秒杀订单消息，数据库表中不存在该字段。
+     */
+    @TableField(exist = false)
+    private Boolean autoIssued;
 
 
 }
