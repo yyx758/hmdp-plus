@@ -35,6 +35,13 @@ build/
 ### Local runtime and benchmark artifacts ###
 .codex-tmp/
 .firecrawl/
+
+### Private materials (keep local only) ###
+/resume-hm-dianping.md
+**/*简历*.md
+**/*resume*.md
+**/*Resume*.md
+**/*CV*.md
 nginx-1.18.0/logs/
 nginx-1.18.0/temp/
 .env

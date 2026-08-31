@@ -89,7 +89,6 @@ flowchart LR
 ## 设计资料
 
 - [高并发与可靠性设计分析](hm-dianping-plus-analysis.md)：围绕限流、Redis 高可用、Kafka、库存一致性和故障恢复的实现说明；
-- [项目简历版说明](resume-hm-dianping.md)：适合快速了解架构、技术栈与项目亮点；
 - [Redis Stream 秒杀订单清理脚本](load-tests/jmeter/cleanup-seckill-order-stream.lua)：压测或本地验证后清理测试订单流数据。
 
 ## 高可用与恢复策略
