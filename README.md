@@ -13,7 +13,7 @@
 - **Redis Sentinel 高可用**：一主二从、三 Sentinel 自动故障转移，业务通过 Sentinel 发现真实主节点。
 - **数据库号段 ID**：Tomcat 集群从 MySQL 原子领取不重叠号段，JVM 内生成订单 ID，并在剩余 20% 时异步预取；实例宕机只产生号码空洞，不会冲突。
 - **多级缓存与防穿透**：Caffeine L1、Redis L2、共享 Bloom Filter、空值缓存、逻辑过期、Redisson 分布式重建锁与 DCL。
-- **分层流量治理**：前置一次性资格令牌，活动/IP/用户维度 Redis 令牌桶，VIP/高价值用户差异化额度，支持运行时调整策略和积压反馈。
+- **Nginx + Redis 分层流量治理**：Nginx 按真实来源 IP 对秒杀路径粗粒度削峰，Redis 再按活动/IP/用户维度执行业务令牌桶；前置一次性资格令牌、VIP/高价值用户差异化额度、运行时策略调整和 Outbox 积压反馈共同控制入口压力。
 - **缓存一致性广播**：商户及秒杀券缓存变更通过 MySQL Outbox + Kafka 可靠广播到各 JVM，本地缓存失效不依赖不可靠的直接通知。
 - **营销能力闭环**：到券订阅、候补发券、Top 买家、开抢提醒、站内通知以及取消订单后的双端库存回流。
 
@@ -67,6 +67,31 @@ flowchart LR
 
 数据库号段与逐单 Redis `INCR` 的 A/B 结果接近，未证明能显著提高完整 HTTP 吞吐。它的主要价值是消除逐单远程 ID 调用、降低 Redis 依赖并保证多 Tomcat 实例全局唯一，而不是包装成性能优化。
 
+### 分层限流压测
+
+最近补充了真实秒杀下单接口的混合流量 A/B/C 测试：攻击流量约 3,000 QPS、持续 30 秒，正常流量约 10 QPS，并使用不同券和不同来源 IP 隔离样本。
+
+| 指标 | 完全无限流 | 仅 Redis 令牌桶 | Nginx + Redis |
+| --- | ---: | ---: | ---: |
+| 总请求数 | 90,904 | 90,841 | 90,833 |
+| 正常订单受理数 / 最终落库数 | 280 / 280 | 276 / 276 | 280 / 280 |
+| 正常请求平均响应时间 | 12.17 ms | 41.21 ms | 9.40 ms |
+| 正常请求 P95 | 52 ms | 162 ms | 22 ms |
+| 正常请求 P99 | 75 ms | 324 ms | 99 ms |
+| Nginx 拒绝的攻击请求 | 0 | 0 | 83,180 |
+| Redis 令牌桶拒绝的攻击请求 | 0 | 84,635 | 1,484 |
+| Redis 命令增量 | 746,652 | 1,512,625 | 181,880 |
+
+这组数据说明：单独使用 Redis 令牌桶能保护库存扣减和落库链路，但所有攻击请求仍会进入 Java 并消耗 Redis 限流脚本；Nginx 前置削峰可在进入应用前拒绝大部分异常流量，使 Redis 命令量降至仅 Redis 方案的约 12%，同时显著改善正常请求 P95。
+
+详细复盘见 `docs/限流优化复盘.md`，压测脚本见 `load-tests/jmeter/seckill-rate-limit-mixed.jmx`。
+
+## 设计资料
+
+- [高并发与可靠性设计分析](hm-dianping-plus-analysis.md)：围绕限流、Redis 高可用、Kafka、库存一致性和故障恢复的实现说明；
+- [项目简历版说明](resume-hm-dianping.md)：适合快速了解架构、技术栈与项目亮点；
+- [Redis Stream 秒杀订单清理脚本](load-tests/jmeter/cleanup-seckill-order-stream.lua)：压测或本地验证后清理测试订单流数据。
+
 ## 高可用与恢复策略
 
 ### Redis Sentinel
@@ -118,13 +143,29 @@ Caffeine L1
 - 逻辑过期场景先返回旧值，再由有界线程池异步重建；
 - 新增或修改秒杀券时同步 Redis 元数据，并通过 Outbox + Kafka 失效各实例 L1。
 
+## 分层限流
+
+```text
+客户端
+  → Nginx limit_req（真实 IP 粗粒度削峰）
+  → 登录态解析
+  → Redis Lua 令牌桶（券 + 场景 + IP + 用户）
+  → Access Token 消费
+  → 秒杀 Lua 原子预扣
+```
+
+- Nginx 只做网关层削峰，当前秒杀路径按 `$binary_remote_addr` 配置约 250 r/s，并允许 200 个突发请求；
+- Nginx 会覆盖客户端伪造的 `X-Forwarded-For`，应用只信任本机反向代理传入的真实来源 IP；
+- Redis 令牌桶继续承担业务维度的精细控制，同一套脚本可分别用于 Access Token 签发和正式下单；
+- Outbox 积压进入 WARNING/CRITICAL 后会降低入场倍率，避免下游落库能力不足时入口仍按固定速率放行。
+
 ## 技术栈
 
 - Java 8 / Spring Boot 2.3 / Maven
 - MyBatis-Plus / MySQL 5.7 / Flyway
 - Redis 6.2 / Sentinel / Redisson / Lua / Caffeine
 - Kafka / Transactional Outbox
-- Docker Compose / JMeter / Nginx
+- Docker Compose / JMeter / Nginx `limit_req`
 
 ## 快速启动
 
@@ -139,6 +180,7 @@ docker compose ps
 
 | 服务 | 地址 |
 | --- | --- |
+| Nginx 前端/反向代理 | `http://127.0.0.1:18080` |
 | 应用 | `http://127.0.0.1:18081` |
 | MySQL | `127.0.0.1:3308` |
 | Redis 节点 | `127.0.0.1:6380`、`6381`、`6382` |
@@ -165,6 +207,7 @@ mvn spring-boot:run
 - `src/main/resources/application.yaml`
 - `src/main/resources/application-redis-sentinel.yaml`
 - `compose.yaml`
+- `nginx-1.18.0/conf/nginx.conf`
 
 ## 测试与压测
 
@@ -184,6 +227,8 @@ mvn test
 
 JMeter 场景和准备脚本位于 `load-tests/jmeter/`。运行容量测试前必须使用专用券、全新用户前缀，并确保用户准备脚本已经结束且 Redis 延迟恢复；不能把数据准备 Lua、应用重启或对账任务造成的停顿计入业务上限。
 
+分层限流对比可使用 `seckill-rate-limit-mixed.jmx`：A 组关闭应用限流，B 组开启 Redis 令牌桶并直连应用端口，C 组通过 Nginx 入口访问。测试时攻击流量和正常流量必须使用不同真实来源 IP，否则 Nginx 网关桶会把两组流量合并统计。
+
 ## 生产环境注意事项
 
 - 示例密码只用于本地开发，生产环境必须通过密钥管理或环境变量替换；
@@ -191,4 +236,5 @@ JMeter 场景和准备脚本位于 `load-tests/jmeter/`。运行容量测试前�
 - Redis Cluster 不是当前首要优化项：微基准显示单主节点仍有余量，优先优化 HTTP 请求的认证往返和 MySQL 持续落库能力；
 - Caffeine 是 JVM 私有缓存，不能作为库存或订单资格的事实源；
 - 只有部署在可信反向代理之后才能启用 `trust-forwarded-headers`；
+- Nginx 限流只适合做入口粗削峰，不能替代 Redis 中按券、场景和用户维度的业务限流；
 - 入口吞吐高于最终落库能力时必须监控 Outbox/Kafka 积压，并依据活动库存和消化时间动态限流。
