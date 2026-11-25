@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Nginx 前置限流｜全链路与通用配置</title>
+  <style>
+    :root{--bg:#101716;--panel:#172220;--panel2:#1d2b28;--line:#36504a;--ink:#edf5ef;--muted:#a9bbb4;--mint:#61d6ab;--amber:#f5b85a;--red:#ff7771;--code:#0b1110;--radius:18px}
+    *{box-sizing:border-box} html{scroll-behavior:smooth} body{margin:0;background:radial-gradient(900px 560px at 85% -10%,#1d433a 0%,transparent 60%),var(--bg);color:var(--ink);font-family:"Microsoft YaHei","PingFang SC",sans-serif;line-height:1.72;text-wrap:pretty}
+    .wrap{width:min(1180px,calc(100% - 32px));margin:auto}.hero{padding:68px 0 42px;border-bottom:1px solid var(--line)}.kicker{color:var(--mint);font:600 13px ui-monospace,Consolas;letter-spacing:.12em;text-transform:uppercase}.hero h1{font-size:clamp(34px,6vw,68px);line-height:1.08;margin:12px 0 20px;letter-spacing:-.05em}.hero p{max-width:760px;color:var(--muted);font-size:18px;margin:0}.pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:24px}.pill{border:1px solid var(--line);border-radius:999px;padding:5px 11px;font:12px ui-monospace,Consolas;color:var(--mint)}
+    nav{position:sticky;top:0;z-index:4;background:#101716e8;backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}nav .wrap{display:flex;gap:18px;overflow:auto;padding:12px 0}nav a{white-space:nowrap;color:var(--muted);text-decoration:none;font-size:14px}nav a:hover{color:var(--mint)}
+    section{padding:52px 0;border-bottom:1px solid #274039}h2{font-size:30px;letter-spacing:-.035em;margin:0 0 9px}h3{font-size:20px;margin:30px 0 10px}.lead{font-size:17px;color:var(--muted);max-width:800px}.notice{margin:22px 0;padding:16px 18px;border:1px solid #7d6434;background:#372c19;border-radius:12px;color:#f9dba4}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}.card{background:linear-gradient(145deg,#1c2a27,#14201e);border:1px solid var(--line);border-radius:var(--radius);padding:20px}.card p{margin:.45em 0;color:var(--muted)}.span4{grid-column:span 4}.span6{grid-column:span 6}.span12{grid-column:span 12}
+    .flow{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:26px 0;align-items:stretch}.node{min-height:146px;cursor:pointer;border:1px solid var(--line);background:var(--panel);border-radius:15px;padding:16px;transition:.2s transform,.2s border-color}.node:hover,.node:focus{transform:translateY(-4px);border-color:var(--mint);outline:none}.node b{display:block;font-size:16px}.node small{display:block;color:var(--muted);margin-top:8px}.node .n{font:12px ui-monospace,Consolas;color:var(--mint);margin-bottom:10px}.arrow{align-self:center;text-align:center;color:var(--mint);font-size:22px}.flow-item{display:contents}.legend{display:flex;gap:18px;flex-wrap:wrap;color:var(--muted);font-size:13px}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}.ok{background:var(--mint)}.warn{background:var(--amber)}.bad{background:var(--red)}
+    pre{position:relative;margin:16px 0;overflow:auto;padding:18px;border:1px solid #2d413c;border-radius:14px;background:var(--code);color:#d8e7df;font:14px/1.6 ui-monospace,Consolas,"Cascadia Code",monospace}code .a{color:#79d5ff}code .b{color:#f5b85a}code .c{color:#61d6ab}.copy{position:absolute;right:9px;top:9px;border:1px solid var(--line);color:var(--muted);background:#172220;border-radius:7px;padding:5px 8px;cursor:pointer}.copy:hover{color:var(--mint)}.annot{border-left:2px solid var(--mint);padding:0 0 0 16px;color:var(--muted)}
+    .sim{display:grid;grid-template-columns:1fr auto;gap:12px;max-width:720px;background:var(--panel);padding:16px;border-radius:14px;border:1px solid var(--line)}input{min-width:0;background:#0c1412;border:1px solid var(--line);color:var(--ink);padding:12px;border-radius:9px;font:14px ui-monospace,Consolas}button{background:var(--mint);color:#092018;border:0;border-radius:9px;padding:0 16px;font-weight:700;cursor:pointer}.result{grid-column:1/-1;padding:12px;border-radius:8px;background:#0c1412;color:var(--muted);font:14px ui-monospace,Consolas}.tag{color:var(--mint)}.danger{color:var(--red)}
+    .toc-card ol{columns:2;margin:0;padding-left:20px}.toc-card a{color:var(--ink);text-decoration:none}.toc-card a:hover{color:var(--mint)}table{width:100%;border-collapse:collapse;margin:20px 0;background:var(--panel);overflow:hidden;border-radius:14px;font-size:15px}th,td{text-align:left;vertical-align:top;padding:14px;border-bottom:1px solid var(--line)}th{color:var(--mint);font:600 13px ui-monospace,Consolas;letter-spacing:.04em}td{color:var(--muted)}td:first-child{color:var(--ink);font-weight:700}.steps{counter-reset:step;display:grid;gap:10px;margin:22px 0}.step{position:relative;padding:16px 16px 16px 64px;border:1px solid var(--line);border-radius:13px;background:var(--panel)}.step:before{counter-increment:step;content:counter(step,decimal-leading-zero);position:absolute;left:16px;color:var(--mint);font:700 14px ui-monospace,Consolas}.step b{display:block}.step p{color:var(--muted);margin:5px 0 0}.choice{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.choice div{padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}.choice b{color:var(--mint);display:block;font-size:14px}.choice p{color:var(--muted);margin:7px 0 0;font-size:14px}.matrix td:last-child{font-family:ui-monospace,Consolas;color:#d8e7df}footer{padding:36px 0 70px;color:var(--muted);font-size:14px}@media(max-width:760px){.hero{padding-top:45px}.flow{grid-template-columns:1fr}.flow-item{display:grid;grid-template-columns:1fr}.arrow{transform:rotate(90deg);padding:2px}.span4,.span6{grid-column:span 12}.toc-card ol{columns:1}.sim{grid-template-columns:1fr}button{padding:12px}.node{min-height:auto}.choice{grid-template-columns:1fr}th,td{padding:11px 9px;font-size:13px}}
+  </style>
+</head>
+<body>
+  <header class="hero"><div class="wrap"><div class="kicker">Nginx · rate limiting · reverse proxy</div><h1>把流量挡在<br>业务系统之前</h1><p>以你的秒杀接口为主线，弄清请求如何进入 Nginx、怎样命中共享限流区、何时被 429 拒绝，以及它如何被安全地转交给 Spring Boot 与 Redis。</p><div class="pills"><span class="pill">LEAKY BUCKET</span><span class="pill">SHARED MEMORY ZONE</span><span class="pill">TRUSTED IP CHAIN</span><span class="pill">SECKILL</span></div></div></header>
+  <nav><div class="wrap"><a href="#flow">01 全链路</a><a href="#zone">02 共享空间</a><a href="#config">03 逐行配置</a><a href="#headers">04 IP/Header</a><a href="#templates">05 通用扩展</a><a href="#pitfalls">06 避坑</a></div></nav>
+  <main class="wrap">
+    <section class="toc-card"><h2>这份文档要回答的事</h2><ol><li><a href="#flow">限流发生在请求的哪个位置？后端为何不需要“进入共享空间”？</a></li><li><a href="#zone">limit_req_zone 创建的究竟是什么？名称、Key、内存各代表什么？</a></li><li><a href="#config">秒杀 location 如何匹配、限流、改写路径并转发？</a></li><li><a href="#headers">$remote_addr、X-Real-IP、X-Forwarded-For 如何建立可信 IP 链？</a></li><li><a href="#templates">换成登录、搜索、开放 API 或多实例网关时，通用配置怎么写？</a></li><li><a href="#pitfalls">哪些配置看似合理，实则会造成误限、伪造 IP 或重复提交？</a></li></ol></section>
+    <section id="flow"><h2>01 · 一次秒杀请求的完整路径</h2><p class="lead">这里有两个不同层面的“共享”：Nginx 的共享内存只供 <b>Nginx worker</b> 共同计数；Redis 的限流 Key 才是在多台 Nginx / Java 实例之间共享的业务状态。Spring Boot 不会也不需要直接进入 Nginx 的 zone。</p><div class="legend"><span><i class="dot ok"></i>正常放行</span><span><i class="dot warn"></i>Nginx 共享计数与削峰</span><span><i class="dot bad"></i>拒绝 / 429</span></div><div class="flow" aria-label="请求链路图"><div class="flow-item"><button class="node" data-target="headers"><span class="n">01 · TCP</span><b>浏览器 / App</b><small>POST /api/voucher-order/seckill/12</small></button><div class="arrow">→</div></div><div class="flow-item"><button class="node" data-target="zone"><span class="n">02 · EDGE</span><b>Nginx location</b><small>最长前缀匹配 seckill 路径</small></button><div class="arrow">→</div></div><div class="flow-item"><button class="node" data-target="zone"><span class="n">03 · MEMORY</span><b>limit_req zone</b><small>按 IP 查找 / 更新桶状态</small></button><div class="arrow">→</div></div><div class="flow-item"><button class="node" data-target="config"><span class="n">04 · PROXY</span><b>反向代理</b><small>改写 /api 前缀，复用到 Java 的连接</small></button><div class="arrow">→</div></div><div class="flow-item"><button class="node" data-target="templates"><span class="n">05 · BUSINESS</span><b>Spring → Redis</b><small>业务限流、资格校验、Lua 原子预扣</small></button></div></div><div class="notice"><b>边界先说清：</b>命中 Nginx 限流时，请求在第 03 步直接由 Nginx 返回 429，Java、Redis、MySQL 都不会收到它。只有被放行的请求，才会继续进入后端。</div></section>
+    <section id="zone"><h2>02 · limit_req_zone：Nginx 自己的共享计数空间</h2><div class="grid"><article class="card span4"><b>Key：谁的一桶？</b><p>$binary_remote_addr 是客户端 IP 的二进制形式。同一 IP 的请求映射到同一桶。</p></article><article class="card span4"><b>Zone：桶放在哪里？</b><p>seckill_gateway_ip:10m 是共享内存区：名称由你命名，10m 是给键与限流状态的内存。</p></article><article class="card span4"><b>Rate：怎样漏水？</b><p>250r/s 表示该 Key 平均每 4ms 漏出一个请求的额度；它不是“每秒整点重置”。</p></article></div><pre><button class="copy">复制</button><code><span class="c"># http 块：声明共享计数空间，所有 worker 可见</span>
+<span class="a">limit_req_zone</span> <span class="b">$binary_remote_addr</span> zone=<span class="b">seckill_gateway_ip:10m</span> rate=<span class="b">250r/s</span>;
+
+<span class="c"># location 块：实际使用上面声明的空间</span>
+<span class="a">limit_req</span> zone=<span class="b">seckill_gateway_ip</span> burst=<span class="b">200</span> nodelay;</code></pre><p class="annot"><b>关键关系：</b>`zone=seckill_gateway_ip` 不是后端服务名，也不是 Redis Key；它只是 Nginx 配置进程内的共享内存区名称。配置加载后，所有 Nginx worker 都根据同一个 IP 去读写这块内存，因此多个 worker 不会各算各的。</p></section>
+    <section id="config"><h2>03 · 你的秒杀 location：匹配 → 限流 → 转发</h2><p class="lead">Nginx 先选中最长匹配的 location，再执行其中的限流和代理规则。因此 /api/voucher-order/seckill/ 会优先于 /api 命中。</p><pre><button class="copy">复制</button><code><span class="a">location</span> <span class="b">/api/voucher-order/seckill/</span> {
+    limit_req zone=seckill_gateway_ip burst=200 nodelay;
+    limit_req_status 429;
+    error_page 429 = @seckill_rate_limited;
+
+    proxy_http_version 1.1;
+    rewrite ^/api/(.*)$ /$1 break;
+    proxy_set_header Connection "";
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_pass http://hmdp_backend;
+}
+
+location @seckill_rate_limited {
+    return 429 '{"success":false,"errorMsg":"请求过于频繁，请稍后重试","layer":"nginx"}';
+}</code></pre><div class="steps"><article class="step"><b>匹配路径</b><p>请求 /api/voucher-order/seckill/12 命中专用 location，而不是后面的通用 /api。因为它的前缀更长、更具体。</p></article><article class="step"><b>检查 Nginx 共享桶</b><p>以 $binary_remote_addr 为 Key 到 seckill_gateway_ip 查状态。超过 rate 但未超过 burst 时，nodelay 让请求立即继续；超过 burst 直接返回 429。</p></article><article class="step"><b>改写后端路径</b><p>rewrite 把 /api/voucher-order/seckill/12 变成 /voucher-order/seckill/12，正好匹配 Spring 的 @RequestMapping(&quot;/voucher-order&quot;)。</p></article><article class="step"><b>携带可信来源信息转发</b><p>Nginx 设置 Header，复用与 upstream 的 HTTP/1.1 连接，转给 127.0.0.1:18081。</p></article></div><div class="sim"><input id="path" value="/api/voucher-order/seckill/12" aria-label="输入请求路径"><button id="run">模拟匹配</button><div class="result" id="result">输入一个路径，再点击“模拟匹配”。</div></div><h3>burst 与 nodelay：你的 250r/s + 200 到底意味着什么？</h3><table><thead><tr><th>配置</th><th>瞬时多出的请求</th><th>用户体验</th><th>适合场景</th></tr></thead><tbody><tr><td>无 burst</td><td>立即拒绝</td><td>最硬，峰值很容易 429</td><td>绝不允许突发的内部保护</td></tr><tr><td>burst=200</td><td>排队，按 250r/s 逐步放行</td><td>延迟可能明显升高</td><td>允许排队且超时可接受</td></tr><tr><td>burst=200 nodelay</td><td>立即通过最多 200 个突发请求</td><td>低延迟，但后端要能承受短峰</td><td>你的秒杀网关粗粒度削峰</td></tr></tbody></table><p class="annot"><b>准确理解：</b>这不是“每秒允许 250 + 200 = 450 个”。250r/s 是稳定速率；200 是可容忍的超额突发容量。秒杀的最终库存和用户级保护仍由 Redis Lua 与业务限流承担。</p></section>
+    <section id="headers"><h2>04 · IP 与 Header：谁能代表真实客户端？</h2><p class="lead">$remote_addr 是 Nginx 内建变量；X-Real-IP 与 X-Forwarded-For 是 HTTP 头名。你的网关覆写它们的目的，是不信任浏览器自己伪造的 Header。</p><div class="grid"><article class="card span6"><b>直连公网：浏览器 → Nginx → Java</b><p>使用 $remote_addr 合理；它就是 Nginx TCP 对端的用户 IP。将 X-Real-IP 与 X-Forwarded-For 都覆写为它，后端读取的 IP 可被信任。</p></article><article class="card span6"><b>有 CDN/SLB：用户 → CDN → Nginx → Java</b><p>此时 $remote_addr 是 CDN/SLB IP。要先用 set_real_ip_from 白名单信任上游网段并还原 IP，之后才可将结果交给限流与后端。</p></article></div><h3>两种部署，写法不能混用</h3><table class="matrix"><thead><tr><th>部署拓扑</th><th>Nginx 限流 Key</th><th>给后端的 Header 写法</th></tr></thead><tbody><tr><td>用户直接访问 Nginx</td><td>$binary_remote_addr</td><td>X-Real-IP $remote_addr；X-Forwarded-For $remote_addr</td></tr><tr><td>可信 CDN / SLB 在前</td><td>还原后的 $binary_remote_addr</td><td>X-Real-IP $remote_addr；X-Forwarded-For $proxy_add_x_forwarded_for</td></tr></tbody></table><pre><button class="copy">复制</button><code><span class="c"># 仅在前方 CDN / SLB 的出口网段可信时使用；网段必须替换为实际值</span>
+set_real_ip_from 10.0.0.0/8;
+set_real_ip_from 192.168.0.0/16;
+real_ip_header X-Forwarded-For;
+real_ip_recursive on;
+
+<span class="c"># 到这里后，$remote_addr 才已还原为可信的客户端 IP</span>
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;</code></pre><p class="notice"><b>安全底线：</b>不能在未设置可信上游白名单时，直接相信客户端传来的 X-Forwarded-For。否则攻击者可以自报任意 IP，绕过按 IP 的限流或伪造审计日志。</p></section>
+    <section id="templates"><h2>05 · 通用扩展：按什么维度限，怎样落配置？</h2><p class="lead">limit_req_zone 里的第一个参数是“限流身份”。Nginx 已有变量和请求头变量可以组合成 Key；zone 名称则完全由你命名。不同接口应分开建 zone，不能一把尺子量所有流量。</p><div class="choice"><div><b>公开读接口</b><p>按 IP。挡爬虫和突发访问，容忍 NAT 下的少量误伤。</p></div><div><b>开放平台 API</b><p>按 API Key。额度跟调用方绑定，比 IP 更公平。</p></div><div><b>高价值写接口</b><p>网关按 IP 粗保，后端再按用户、资源执行业务限流。</p></div></div><h3>模板 A：公开查询接口，按 IP</h3><pre><button class="copy">复制</button><code><span class="c"># http 块</span>
+limit_req_zone $binary_remote_addr zone=public_ip:10m rate=20r/s;
+
+<span class="c"># server 块</span>
+location /api/search/ {
+    limit_req zone=public_ip burst=40 nodelay;
+    limit_req_status 429;
+    proxy_pass http://backend;
+}</code></pre><h3>模板 B：开放平台，按 API Key</h3><pre><button class="copy">复制</button><code><span class="c"># X-Api-Key 自动映射为 $http_x_api_key；空 Key 会共用同一个空桶</span>
+limit_req_zone $http_x_api_key zone=partner_key:10m rate=100r/m;
+
+location /open-api/ {
+    <span class="c"># 生产上应先鉴权并拒绝缺失 Key，再进行该限流</span>
+    limit_req zone=partner_key burst=20;
+    limit_req_status 429;
+    proxy_pass http://backend;
+}</code></pre><h3>模板 C：登录接口，IP 限流 + 并发连接限制</h3><pre><button class="copy">复制</button><code><span class="c"># http 块：请求速率与并发连接是两件事</span>
+limit_req_zone  $binary_remote_addr zone=login_ip_rate:10m rate=5r/m;
+limit_conn_zone $binary_remote_addr zone=login_ip_conn:10m;
+
+location = /api/user/login {
+    limit_req  zone=login_ip_rate burst=3 nodelay;
+    limit_conn login_ip_conn 10;
+    limit_req_status 429;
+    proxy_pass http://backend;
+}</code></pre><h3>模板 D：秒杀 / 抢购，Nginx 与 Redis 各做自己擅长的事</h3><table><thead><tr><th>层</th><th>限流 Key</th><th>目标</th><th>是否跨多台网关</th></tr></thead><tbody><tr><td>Nginx</td><td>IP</td><td>尽早拦截洪峰，保护 Java 连接、线程与 Redis</td><td>否。每台 Nginx 各有自己的共享内存</td></tr><tr><td>Redis Lua</td><td>券 + 场景 + IP / 用户</td><td>全局业务额度、用户公平性、动态降级</td><td>是。所有业务实例访问同一 Redis 集群</td></tr><tr><td>Lua 预扣</td><td>券 + 用户 + 库存</td><td>一人一单、不超卖、原子接受请求</td><td>是</td></tr></tbody></table><pre><button class="copy">复制</button><code><span class="c"># 你的 Nginx：只做很早、很便宜的第一道防线</span>
+limit_req_zone $binary_remote_addr zone=seckill_gateway_ip:10m rate=250r/s;
+
+location /api/voucher-order/seckill/ {
+    limit_req zone=seckill_gateway_ip burst=200 nodelay;
+    limit_req_status 429;
+    error_page 429 = @seckill_rate_limited;
+    proxy_pass http://hmdp_backend;
+}
+
+location @seckill_rate_limited {
+    add_header X-Rate-Limit-Layer nginx always;
+    return 429 '{"success":false,"errorMsg":"请求过于频繁，请稍后重试","layer":"nginx"}';
+}</code></pre></section>
+    <section id="pitfalls"><h2>06 · 生产避坑与排错顺序</h2><div class="steps"><article class="step"><b>确认限流对象是不是“真实用户”</b><p>直连 Nginx 才用 $binary_remote_addr。若有 CDN/SLB，先配置可信网段和 real_ip；否则所有用户可能被识别为一个 SLB IP，或被伪造 Header 绕过。</p></article><article class="step"><b>区分单机 Nginx zone 与全局限流</b><p>zone 是单个 Nginx 实例的共享内存，不会同步到另一台网关。两台网关各 250r/s，整体理论入口可能达到 500r/s。需要全局公平配额时交给 Redis、网关集群能力或专用限流服务。</p></article><article class="step"><b>不要让网关替业务做最终正确性判断</b><p>Nginx 只能看网络侧 Key，不能安全理解登录用户、券状态、库存或一人一单。因此秒杀仍必须在 Redis Lua 中原子校验和预扣。</p></article><article class="step"><b>谨慎重试代理的 POST</b><p>proxy_next_upstream error timeout 在多个 upstream 后端时可能让请求重新投递。下单接口必须带幂等订单号 / Lua 幂等性；否则网络超时不等于后端未处理。</p></article><article class="step"><b>让 429 可观测</b><p>保留独立 access_log 或在响应中写入 X-Rate-Limit-Layer。监控 Nginx 429、Java 429、Redis 限流拒绝与 Redis 延迟，才能判断到底在哪层收紧。</p></article></div><h3>排查：为什么“我以为限流了，实际没限”？</h3><table><thead><tr><th>现象</th><th>优先检查</th><th>结论 / 修复</th></tr></thead><tbody><tr><td>秒杀请求没有 429</td><td>实际 URL 是否有结尾斜杠；是否命中专用 location</td><td>检查 access log 中的请求 URI；用更精确的 location 或统一客户端路径</td></tr><tr><td>所有人很快被限</td><td>$remote_addr 是否都变成 SLB / CDN 地址</td><td>配置 real_ip 信任链后再按 IP 限流</td></tr><tr><td>多台网关总流量超预期</td><td>是否误以为 zone 是集群共享</td><td>每台分别计数；把全局业务额度迁到 Redis</td></tr><tr><td>后端路径 404</td><td>rewrite 后路径、Spring Mapping、proxy_pass 尾部斜杠语义</td><td>明确打印实际转发 URI；你的 rewrite + break 结果是 /voucher-order/...</td></tr><tr><td>POST 被重复下单</td><td>超时重试、客户端重复点击、代理重试</td><td>不要依赖 Nginx 避免重复；在 Redis Lua / 数据库唯一索引做幂等</td></tr></tbody></table><h3>最后的配置检查清单</h3><div class="grid"><article class="card span4"><b>位置正确</b><p>limit_req_zone 位于 http；limit_req 位于 location 或 server；专用秒杀 location 比通用 /api 更具体。</p></article><article class="card span4"><b>身份可信</b><p>先处理 CDN/SLB 的 real_ip；不盲信浏览器自带的 X-Forwarded-For。</p></article><article class="card span4"><b>层次分明</b><p>Nginx 拦洪峰，Redis 控全局业务频率，Lua 保正确性，数据库做最终持久化约束。</p></article></div></section>
+  </main>
+  <footer><div class="wrap">完成版 · Nginx 前置限流：从单机共享内存，到多层限流和可信来源链路。</div></footer>
+  <script>
+    document.querySelectorAll('[data-target]').forEach(n=>n.addEventListener('click',()=>{const el=document.getElementById(n.dataset.target);window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-55,behavior:'smooth'});}));
+    document.querySelectorAll('.copy').forEach(b=>b.addEventListener('click',async()=>{await navigator.clipboard.writeText(b.parentElement.innerText.replace('复制',''));b.textContent='已复制';setTimeout(()=>b.textContent='复制',1200)}));
+    document.getElementById('run').addEventListener('click',()=>{const p=document.getElementById('path').value.trim(),r=document.getElementById('result');if(p.startsWith('/api/voucher-order/seckill/'))r.innerHTML='<span class="tag">命中：</span> 专用秒杀 location → Nginx IP 限流 → rewrite 为 <b>'+p.replace(/^\/api/,'')+'</b> → hmdp_backend';else if(p.startsWith('/api'))r.innerHTML='<span class="tag">命中：</span> 通用 /api location → 不走这一条秒杀 Nginx 限流 → rewrite 为 <b>'+p.replace(/^\/api/,'')+'</b> → hmdp_backend';else r.innerHTML='<span class="danger">命中：</span> location / → 静态前端目录 html/hmdp';});
+  </script>
+</body>
+</html>

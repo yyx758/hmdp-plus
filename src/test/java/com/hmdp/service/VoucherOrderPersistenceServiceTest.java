@@ -48,7 +48,7 @@ class VoucherOrderPersistenceServiceTest {
     void doesNotDecrementStockWhenWholeBatchWasAlreadyPersisted() {
         VoucherOrder order = order(1001L, 7L);
         Mockito.when(voucherOrderMapper.batchInsertIgnore(Mockito.anyList())).thenReturn(0);
-        Mockito.when(voucherOrderMapper.selectOrderId(7L, 2L)).thenReturn(1001L);
+        Mockito.when(voucherOrderMapper.selectById(1001L)).thenReturn(order);
 
         assertDoesNotThrow(() -> persistenceService.createVoucherOrders(Collections.singletonList(order)));
 
@@ -77,6 +77,28 @@ class VoucherOrderPersistenceServiceTest {
 
         assertEquals(1001L, error.getCurrentOrderId());
         assertEquals(9001L, error.getExistingOrderId());
+    }
+
+    @Test
+    void treatsRedeliveryAfterCancellationAsAlreadyPersisted() {
+        VoucherOrder cancelled = order(1001L, 7L).setStatus(4);
+        Mockito.when(voucherOrderMapper.batchInsertIgnore(Mockito.anyList())).thenReturn(0);
+        Mockito.when(voucherOrderMapper.selectById(1001L)).thenReturn(cancelled);
+
+        assertDoesNotThrow(() -> persistenceService.createVoucherOrder(order(1001L, 7L)));
+
+        Mockito.verify(voucherOrderMapper, Mockito.never())
+                .decrementStock(Mockito.anyLong(), Mockito.anyInt());
+        Mockito.verify(voucherOrderMapper, Mockito.never()).selectOrderId(7L, 2L);
+    }
+
+    @Test
+    void rejectsOrderIdReusedForDifferentUser() {
+        Mockito.when(voucherOrderMapper.batchInsertIgnore(Mockito.anyList())).thenReturn(0);
+        Mockito.when(voucherOrderMapper.selectById(1001L)).thenReturn(order(1001L, 8L));
+
+        assertThrows(IllegalStateException.class,
+                () -> persistenceService.createVoucherOrder(order(1001L, 7L)));
     }
 
     @Test

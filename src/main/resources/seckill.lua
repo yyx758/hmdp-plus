@@ -25,6 +25,8 @@ local accessTokenKey = 'seckill:access:token:{' .. voucherId .. '}:' .. userId
 local handoffKey = 'seckill:order:handoff:{' .. voucherId .. '}'
 local recoveryKey = 'seckill:recovery:' .. voucherId
 local acceptedKey = 'seckill:order:accepted'
+local acceptedUserKey = 'seckill:order:accepted:user:' .. voucherId
+local acceptedAuditKey = 'seckill:order:accepted:audit'
 
 -- 恢复过程中不接受新预扣，避免数据库快照与新请求交叉。
 if(redis.call('exists', recoveryKey) == 1) then
@@ -84,7 +86,8 @@ redis.call('sadd', orderKey, userId)
 -- 3.17.只写一条临时Handoff；Outbox提交后删除，不再维护Stream和Redis PROCESSING状态
 local handoffMember = orderId .. '|' .. userId .. '|0'
 redis.call('zadd', handoffKey, currentTime, handoffMember)
--- 对外已提示抢券成功时，Outbox 可能尚未创建；该短期凭证供内部状态查询校验订单归属。
--- Handoff 转存 Outbox 后立即 HDEL，避免为高峰订单创建海量独立 key。
-redis.call('hset', acceptedKey, orderId, userId .. '|' .. voucherId)
+-- 保留受理凭证至终态和保留期结束，供故障时查询及逐单恢复。
+redis.call('hset', acceptedKey, orderId, userId .. '|' .. voucherId .. '|' .. currentTime .. '|PROCESSING')
+redis.call('hset', acceptedUserKey, userId, orderId)
+redis.call('zadd', acceptedAuditKey, currentTime + 60000, orderId)
 return 0

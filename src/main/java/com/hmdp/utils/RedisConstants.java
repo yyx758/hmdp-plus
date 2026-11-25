@@ -32,6 +32,9 @@ public class RedisConstants {
     public static final String SECKILL_ORDER_KEY = "seckill:order:";
     public static final String SECKILL_ORDER_HANDOFF_KEY = "seckill:order:handoff:";
     public static final String SECKILL_ORDER_ACCEPTED_KEY = "seckill:order:accepted";
+    public static final String SECKILL_ORDER_ACCEPTED_USER_KEY = "seckill:order:accepted:user:";
+    public static final String SECKILL_ORDER_ACCEPTED_EXPIRE_KEY = "seckill:order:accepted:expire";
+    public static final String SECKILL_ORDER_ACCEPTED_AUDIT_KEY = "seckill:order:accepted:audit";
     public static final String SECKILL_ORDER_HANDOFF_RELAY_LEASE_KEY =
             "seckill:order:handoff:relay:lease";
     public static final String SECKILL_ORDER_HANDOFF_QUARANTINE_KEY =

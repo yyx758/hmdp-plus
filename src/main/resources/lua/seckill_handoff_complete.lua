@@ -1,5 +1,7 @@
 local handoffKey = KEYS[1]
-local acceptedKey = KEYS[2]
+-- KEYS[2] is retained for callers using the old script signature.  The
+-- acceptance receipt must survive the Redis-to-MySQL handoff so status
+-- queries can still identify the order while MySQL is unavailable.
 local argumentCount = #ARGV
 if argumentCount == 0 then
     return 0
@@ -18,5 +20,4 @@ end
 -- Keep the responsibility-transfer cleanup atomic, but issue only two Redis
 -- commands for the whole batch instead of two commands per event.
 local removed = redis.call('ZREM', handoffKey, unpack(members))
-redis.call('HDEL', acceptedKey, unpack(orderIds))
 return removed

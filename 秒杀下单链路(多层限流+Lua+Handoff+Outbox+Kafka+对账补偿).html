@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>秒杀下单链路：限流、Lua、Handoff、Outbox、Kafka 与对账</title>
+  <style>
+    :root{--ink:#172033;--sub:#62708a;--bg:#f4f5f7;--paper:#fff;--line:#d9dee8;--navy:#102442;--blue:#1663c7;--cyan:#007c91;--amber:#9a5900;--amberbg:#fff6e7;--red:#aa3b41;--redbg:#fff1f1;--green:#08735b;--greenbg:#ecfaf5;--code:#131c2c}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.78 "Segoe UI","Microsoft YaHei",sans-serif;text-wrap:pretty}header{background:linear-gradient(130deg,#0c1b33,#123a68);color:#fff;padding:58px max(26px,calc((100vw - 1120px)/2)) 66px}header h1{font-size:clamp(31px,5vw,52px);line-height:1.16;letter-spacing:-1.5px;margin:12px 0}header p{max-width:850px;margin:0;color:#d7e5f6;font-size:18px}.eyebrow{font:700 12px/1.2 Consolas,monospace;letter-spacing:.12em;color:#86d9df}.wrap{width:min(1120px,calc(100% - 30px));margin:-26px auto 60px}.toc{position:relative;background:#fff;border:1px solid var(--line);border-radius:10px;padding:17px 20px;box-shadow:0 8px 20px #15203910}.toc a{display:inline-block;margin:3px 14px 3px 0;color:var(--blue);font-size:14px;text-decoration:none}.toc a:hover{text-decoration:underline}section{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:30px;margin:20px 0}h2{font-size:26px;line-height:1.35;margin:0 0 14px}h3{font-size:20px;margin:26px 0 8px}h4{font-size:16px;margin:17px 0 5px}p{margin:8px 0}.lead{font-size:18px;color:#2a3952}.flow{display:flex;align-items:stretch;gap:7px;flex-wrap:wrap;padding:16px;background:#f2f7fc;border:1px solid #c7d8e9;border-radius:8px}.node{display:flex;align-items:center;padding:7px 10px;border:1px solid #bad0e4;background:#fff;color:#17395c;border-radius:5px;font-weight:700;font-size:14px}.arrow{align-self:center;color:#6e93b6}.phase{display:grid;grid-template-columns:160px 1fr;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:14px 0}.phase .label{padding:14px;background:#eff5fb;font-weight:700;color:#174878}.phase .body{padding:14px}table{width:100%;border-collapse:collapse;margin:13px 0;font-size:14px}th,td{text-align:left;vertical-align:top;padding:10px;border:1px solid var(--line)}th{background:#f0f3f7}code{background:#edf1f6;border-radius:3px;padding:1px 4px;font-family:Consolas,"Cascadia Code",monospace;font-size:.88em}pre{overflow:auto;margin:12px 0;padding:18px;border-radius:8px;background:var(--code);color:#dce7fa;border:1px solid #27364c;font:13px/1.55 Consolas,"Cascadia Code",monospace;tab-size:4}.c{color:#8c9cb7}.k{color:#9dc6ff}.s{color:#b7e8a6}.n{color:#ffcb8e}.callout{padding:13px 16px;margin:15px 0;border-radius:6px;background:#ecf5ff;border-left:4px solid var(--blue)}.ok{background:var(--greenbg);border-left-color:#16936f}.warn{background:var(--amberbg);border-left-color:#d58a1c}.danger{background:var(--redbg);border-left-color:#d6535a}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}.card{border:1px solid var(--line);border-radius:8px;background:#fbfcfe;padding:16px}.card h3{margin-top:0}.tag{display:inline-block;border:1px solid #577b9f;border-radius:99px;color:#d0e7ff;padding:3px 9px;font:12px Consolas,monospace}.q{font-weight:700;color:#174b80;margin-top:17px}details{border:1px solid var(--line);border-radius:7px;background:#fbfcff;padding:10px 13px;margin:10px 0}summary{cursor:pointer;font-weight:700;color:#244d79}footer{color:var(--sub);font-size:13px;padding:4px}@media(max-width:720px){section{padding:20px}.grid{grid-template-columns:1fr}.phase{grid-template-columns:1fr}.phase .label{padding:9px 14px}header{padding-top:42px}.wrap{width:min(100% - 20px,1120px)}}@media print{body{background:#fff;font-size:12px}header{padding:24px}.wrap{width:100%;margin:0}section{break-inside:avoid;margin:8px 0;padding:16px}.toc{margin:8px 0;box-shadow:none}pre{white-space:pre-wrap}}
+  </style>
+</head>
+<body>
+<header><div class="eyebrow">HM-DIANPING · SECKILL ORDER PIPELINE</div><h1>秒杀下单链路<br>从洪峰请求到最终一致</h1><p>这份文档只讲当前项目真实实现：入口多层限流、Redis Lua 原子受理、Redis Handoff、MySQL Outbox、Kafka 落库、重试、死信与对账补偿。每一层都回答三个问题：为什么要它、代码如何做、它消除了哪个故障窗口。</p></header>
+<main class="wrap">
+<nav class="toc"><strong>阅读路径：</strong><a href="#overview">1. 全景</a><a href="#limit">2. 多层限流</a><a href="#lua">3. Lua 原子受理</a><a href="#handoff">4. 为什么有 Handoff</a><a href="#outbox">5. Outbox/Kafka</a><a href="#consumer">6. 消费落库</a><a href="#status">7. 状态与失败恢复</a><a href="#reconcile">8. 对账补偿</a><a href="#interview">9. 面试复述</a></nav>
+
+<section id="overview"><h2>1. 先建立全景：这不是“下单接口”，而是一条可靠受理链路</h2><p class="lead">秒杀的第一目标不是立即把订单写进 MySQL，而是以极低延迟、原子地决定“这个用户是否获得购买资格”，随后异步且可恢复地把资格转成数据库订单。</p><div class="flow"><span class="node">Nginx 粗限流</span><span class="arrow">→</span><span class="node">Redis IP/用户令牌桶</span><span class="arrow">→</span><span class="node">资格令牌</span><span class="arrow">→</span><span class="node">Lua：校验/预扣/去重</span><span class="arrow">→</span><span class="node">Redis Handoff</span><span class="arrow">→</span><span class="node">MySQL Outbox</span><span class="arrow">→</span><span class="node">Kafka</span><span class="arrow">→</span><span class="node">订单落库</span></div><table><thead><tr><th>层</th><th>核心职责</th><th>不是它负责的事</th></tr></thead><tbody><tr><td>限流</td><td>提前拒绝无意义/过量流量，保护线程、Redis、下游。</td><td>不决定库存与订单正确性。</td></tr><tr><td>Lua</td><td>在一个原子边界内预扣库存、保证一人一单。</td><td>不承担 MySQL 持久化。</td></tr><tr><td>Handoff + Outbox</td><td>跨越 Redis 原子预扣与 MySQL 可持久事件之间的崩溃窗口。</td><td>不直接创建业务订单。</td></tr><tr><td>Kafka 消费者</td><td>异步批量创建订单、扣数据库库存、完成 Outbox。</td><td>不依赖“只收到一次消息”。</td></tr></tbody></table><div class="callout ok"><strong>核心语义：</strong>入口成功代表“Redis 已原子接受这次购买资格”，不代表订单已同步落库；因此客户端得到 <code>orderId</code> 后应查询状态，系统允许短暂 <code>PROCESSING</code>。</div></section>
+
+<section id="limit"><h2>2. 多层限流：越靠前越便宜，越靠后越精确</h2><h3>2.1 网关层：Nginx 先削掉明显洪峰</h3><pre><span class="c"># nginx.conf：只针对 /api/voucher-order/seckill/</span>
+limit_req_zone $binary_remote_addr zone=seckill_gateway_ip:<span class="n">10m</span> rate=<span class="n">250r/s</span>;
+
+location /api/voucher-order/seckill/ {
+    limit_req zone=seckill_gateway_ip burst=<span class="n">200</span> nodelay;
+    limit_req_status <span class="n">429</span>;
+    error_page <span class="n">429</span> = @seckill_rate_limited;
+    proxy_set_header X-Real-IP $remote_addr; <span class="c"># 覆盖客户端伪造来源 IP</span>
+    proxy_pass http://hmdp_backend;
+}</pre><p>它按 Nginx 实际看到的来源 IP 做粗粒度漏桶限流：稳态每秒 250 个请求，额外允许 200 的瞬时突发，超过直接返回 429。结果是异常流量不进入 Java 线程池、更不消耗 Redis 命令。</p><h3>2.2 应用层：按“券 + 场景 + IP/用户”做分布式令牌桶</h3><pre><span class="c">// VoucherOrderController：领资格令牌与正式下单各经过一次限流</span>
+seckillRateLimitService.check(voucherId, user, clientIp,
+        SeckillRateLimitScene.SECKILL_ORDER);
+return voucherOrderService.seckillVoucher(voucherId, accessToken);</pre><p>默认配置是每张券、每种场景下：IP 桶 <code>200 次 / 秒</code>，用户桶 <code>2 次 / 秒</code>。IP 桶处理同网段/脚本洪泛；用户桶处理同一个登录用户快速重放。key 含 <code>{voucherId}</code>，让同一秒杀券的相关 key 在 Redis Cluster 中落入同一槽位，便于 Lua 原子执行。</p><pre><span class="c">// SeckillRateLimitServiceImpl：一次 Lua 同时检查两个桶</span>
+String ipBucketKey = <span class="s">"seckill:rate:ip:{"</span> + voucherId + <span class="s">"}:order:"</span> + normalizedIp;
+String userBucketKey = <span class="s">"seckill:rate:user:{"</span> + voucherId + <span class="s">"}:order:"</span> + userId;
+Long result = stringRedisTemplate.execute(TOKEN_BUCKET_SCRIPT,
+    Arrays.asList(ipBucketKey, userBucketKey, policyKey),
+    ipWindowMillis, ipCapacity, userWindowMillis, userCapacity,
+    userCapacityMultiplier, admissionMultiplier);</pre><h3>2.3 Lua 令牌桶为什么不拆成两次 Redis 调用</h3><pre><span class="c">-- seckill_token_bucket.lua：先预览两个桶，只有都允许才一起消费</span>
+local ipTokens, ipAllowed = preview(ipBucketKey, ipWindowMillis, ipCapacity)
+local userTokens, userAllowed = preview(userBucketKey, userWindowMillis, userCapacity)
+local allowed = ipAllowed and userAllowed
+persist(ipBucketKey, ipWindowMillis, ipTokens, allowed)
+persist(userBucketKey, userWindowMillis, userTokens, allowed)</pre><p>若拆成“先扣 IP 令牌、再扣用户令牌”，用户桶失败时可能白白消耗 IP 令牌。Lua 让“两个桶是否都通过”和“是否同时扣令牌”处于一个 Redis 原子边界。</p><h3>2.4 动态收紧：下游越堵，入口放行越少</h3><pre><span class="c">// SeckillOrderPressureService：每秒统计可靠受理积压</span>
+long current = outboxMapper.countBacklog(); <span class="c">// PENDING + SENT</span>
+if (current >= criticalBacklog) update(current, <span class="s">"CRITICAL"</span>, <span class="n">0.1D</span>);
+else if (current >= warningBacklog) update(current, <span class="s">"WARNING"</span>, <span class="n">0.5D</span>);
+else update(current, <span class="s">"NORMAL"</span>, <span class="n">1.0D</span>);</pre><p>默认积压超过 1000 时，入口容量乘 0.5；超过 5000 时乘 0.1。它解决“Kafka/数据库已经落后，入口却仍按固定 200r/s 放行”的正反馈雪崩。VIP/高价值用户可有更高个人容量倍率，但自适应压力倍率仍会总体收紧。</p><div class="callout warn"><strong>限流的边界：</strong>限流只是削峰和防刷；它不是库存一致性方案。即使限流完全失效，Lua 仍必须保证不能超卖；反过来，即使 Lua 正确，缺少限流也会让 Redis 成为流量瓶颈。</div></section>
+
+<section id="lua"><h2>3. Lua 原子受理：一人一单和不超卖如何同时保证</h2><h3>3.1 资格令牌：把“拿资格”与“真正抢购”拆开</h3><p>先调用 <code>GET /seckill/token/{voucherId}</code>，服务端对“券 + 用户”生成一个 30 秒令牌。重复领取不会不停生成新令牌，而是返回未过期的旧令牌：</p><pre><span class="c">-- seckill_access_token_issue.lua</span>
+local existing = redis.call(<span class="s">'GET'</span>, key)
+if existing then return existing end
+redis.call(<span class="s">'PSETEX'</span>, key, ttlMillis, candidate)
+return candidate</pre><p>令牌不是订单正确性的最终依据，它的作用是提前过滤未经过领资格入口的请求、缩短有效攻击面。关键在于：令牌的校验与删除不单独在 Java 里做，而被放进下单 Lua。</p><h3>3.2 正式下单时，Java 只发起一次 Lua</h3><pre><span class="c">// VoucherOrderServiceImpl.seckillVoucher()</span>
+Long code = stringRedisTemplate.execute(SECKILL_SCRIPT, Collections.emptyList(),
+    voucherId.toString(), userId.toString(), String.valueOf(orderId),
+    String.valueOf(System.currentTimeMillis()), accessToken == null ? <span class="s">""</span> : accessToken,
+    tokenEnabled ? <span class="s">"1"</span> : <span class="s">"0"</span>);</pre><h3>3.3 一次脚本内的操作顺序</h3><pre><span class="c">-- seckill.lua：省略活动时间/状态判断后的关键部分</span>
+if tonumber(redis.call(<span class="s">'get'</span>, stockKey)) &lt;= <span class="n">0</span> then return <span class="n">1</span> end        <span class="c">-- 无库存</span>
+if redis.call(<span class="s">'sismember'</span>, orderKey, userId) == <span class="n">1</span> then return <span class="n">2</span> end <span class="c">-- 已购</span>
+if accessTokenEnabled and redis.call(<span class="s">'get'</span>, accessTokenKey) ~= accessToken then return <span class="n">7</span> end
+if accessTokenEnabled then redis.call(<span class="s">'del'</span>, accessTokenKey) end
+redis.call(<span class="s">'incrby'</span>, stockKey, -<span class="n">1</span>)          <span class="c">-- 预扣库存</span>
+redis.call(<span class="s">'sadd'</span>, orderKey, userId)             <span class="c">-- 记录“该用户已购”</span>
+redis.call(<span class="s">'zadd'</span>, handoffKey, currentTime, handoffMember)
+redis.call(<span class="s">'hset'</span>, acceptedKey, orderId, userId .. <span class="s">'|'</span> .. voucherId)
+return <span class="n">0</span></pre><div class="grid"><div class="card"><h3>为什么一人一单成立</h3><p><code>orderKey</code> 是按券划分的 Redis Set；同一用户第二次请求看到 <code>SISMEMBER=1</code> 直接返回。检查与 <code>SADD</code> 同在 Lua，因此不存在并发窗口。</p></div><div class="card"><h3>为什么不超卖成立</h3><p>库存检查与 <code>INCRBY -1</code> 同在 Lua 原子执行。两个并发请求不可能都在同一份库存上各自看到“还有最后 1 件”。</p></div></div><div class="callout danger"><strong>为什么不能写成 Java 的 if + decrement：</strong>两个请求可能都读到库存为 1，再分别扣减，造成超卖。分布式锁可以缓解但增加往返和锁竞争；对 Redis 内部多 key 状态变更，Lua 提供了更小、更清晰的原子边界。</div><p>Lua 成功后接口会立即返回 <code>orderId + SUCCESS</code>；若 Redis 执行异常，系统返回“结果未确认”，而不是武断认定失败，因为客户端可能在 Redis 已执行成功、但响应丢失后重试。</p></section>
+
+<section id="handoff"><h2>4. 为什么 Outbox 前还需要 Redis Handoff？</h2><p class="lead">因为 Lua 中的 Redis 原子提交和 MySQL Outbox 插入不在同一个事务里。Handoff 是专门保护两者之间崩溃窗口的临时交接队列。</p><div class="phase"><div class="label">没有 Handoff</div><div class="body"><code>Lua 预扣成功</code> → 应用准备写 MySQL Outbox → 进程宕机。此时 Redis 库存已减、用户已标记购买，但 MySQL 没有事件；Kafka 不会有消息，订单可能永远不落库。</div></div><div class="phase"><div class="label">有 Handoff</div><div class="body"><code>Lua 预扣成功</code> 时，同步 <code>ZADD seckill:order:handoff:{voucherId}</code>；即便 Java 随后宕机，后台 Handoff Relay 仍能从 Redis 读出该订单并转成持久化 Outbox。</div></div><pre><span class="c">-- Lua 内交接记录：ZSet score 是受理时间，member = orderId|userId|autoIssued</span>
+local handoffMember = orderId .. <span class="s">'|'</span> .. userId .. <span class="s">'|0'</span>
+redis.call(<span class="s">'zadd'</span>, handoffKey, currentTime, handoffMember)
+
+<span class="c">// Handoff Relay：常驻线程，每轮按券取最早的一批</span>
+Set&lt;String&gt; members = handoffService.findFirst(voucherId, batchSize);
+SeckillOrderOutboxEvent event = handoffService.parse(voucherId, member);
+batchWriter.insertCommitted(events);       <span class="c">// MySQL 事务插入 Outbox</span>
+handoffService.completeBatch(voucherId, events, members); <span class="c">// 成功后才从 Redis 删除</span></pre><p>Handoff Relay 使用 Redis 租约保证多实例中一个活跃工作者处理；MySQL 插入失败时成员保留在 ZSet 中，按 100ms 到 5s 指数退避重试。遇到格式错误或数据完整性冲突，单条隔离到 quarantine，避免一条坏记录堵住整批。</p><h3>4.1 “先删 Handoff 再写 Outbox”为什么绝对不行</h3><table><thead><tr><th>顺序</th><th>崩溃后果</th><th>项目选择</th></tr></thead><tbody><tr><td>先删 Handoff，后写 Outbox</td><td>删成功后崩溃，订单永久消失。</td><td>不采用。</td></tr><tr><td>先写 Outbox，后删 Handoff</td><td>写成功后崩溃，可能重复转存。</td><td>采用；Outbox 的 <code>eventId=orderId</code> 作为幂等键。</td></tr></tbody></table><pre><span class="c">-- seckill_handoff_complete.lua：只在 MySQL 写成功之后执行；一次原子清理</span>
+redis.call(<span class="s">'ZREM'</span>, handoffKey, unpack(members))
+redis.call(<span class="s">'HDEL'</span>, acceptedKey, unpack(orderIds))</pre><p><code>acceptedKey</code> 是短暂的“已接受订单归属凭证”：Outbox 尚未生成时，状态查询还能确认该 <code>orderId</code> 属于当前用户，并返回 <code>PROCESSING</code>。</p></section>
+
+<section id="outbox"><h2>5. MySQL Outbox 到 Kafka：可靠投递，而非幻想中的跨库事务</h2><h3>5.1 Outbox 是什么</h3><p>Outbox 表把“已接受的订单事件”持久化到 MySQL。状态机为 <code>PENDING → SENT → COMPLETED</code>；异常可进入 <code>MANUAL_REVIEW</code>。它是 Kafka 投递的可靠来源，也是状态查询与对账的依据。</p><pre><span class="c">// SeckillOrderOutboxEvent.pending()</span>
+return new SeckillOrderOutboxEvent()
+  .setEventId(String.valueOf(orderId)) <span class="c">// 订单 ID 即幂等事件 ID</span>
+  .setOrderId(orderId).setVoucherId(voucherId).setUserId(userId)
+  .setStatus(STATUS_PENDING).setRetryCount(<span class="n">0</span>).setNextRetryTime(now);</pre><h3>5.2 Outbox Relay 如何并发安全地发送</h3><pre><span class="c">// SeckillOrderOutboxRelay：默认每 100ms 扫描</span>
+List&lt;Event&gt; events = outboxMapper.findDispatchable(batchSize);
+LocalDateTime leaseUntil = LocalDateTime.now().plusSeconds(relayLeaseSeconds);
+if (outboxMapper.claimRelayBatch(candidateIds, relayOwner, leaseUntil) == <span class="n">0</span>) return;
+List&lt;Event&gt; claimed = outboxMapper.findClaimedBatch(candidateIds, relayOwner);
+dispatchBatch(claimed);</pre><p>订单 Relay 不依赖 Redis 锁，而是使用 MySQL 行级租约抢占事件。原因是：当 Redis Sentinel 故障转移或 Redis 不可用时，已持久化的订单仍应可继续投递；MySQL 是 Outbox 的权威存储。</p><pre><span class="c">// 生产者：按 voucherId 作为 Kafka key，同一张券保持分区内顺序</span>
+return kafkaTemplate.send(topic, String.valueOf(message.getVoucherId()), message);
+
+<span class="c">// 真实 Kafka 消息 JSON</span>
+{
+  <span class="s">"eventId"</span>: <span class="s">"123456789"</span>, <span class="s">"outboxId"</span>: <span class="n">88</span>, <span class="s">"orderId"</span>: <span class="n">123456789</span>,
+  <span class="s">"voucherId"</span>: <span class="n">12</span>, <span class="s">"userId"</span>: <span class="n">1001</span>, <span class="s">"autoIssued"</span>: <span class="k">false</span>,
+  <span class="s">"occurredAtEpochMillis"</span>: <span class="n">1761019200000</span>
+}</pre><p>生产者配置了 <code>acks=all</code>、<code>enable.idempotence=true</code>：只有 ISR 副本确认后才算发送成功，网络重试也不会让同一次 producer send 重复追加。</p><div class="callout warn"><strong>仍然是至少一次：</strong>Kafka 确认成功后、Relay 把 Outbox 标为 <code>SENT</code> 前若宕机，事件会再次发送。系统刻意接受重复，并在消费者用幂等落库处理；这比“为了避免重复而可能丢订单”安全得多。</div></section>
+
+<section id="consumer"><h2>6. Kafka 消费：手动 ACK 只发生在数据库事务成功之后</h2><pre><span class="c">// SeckillOrderKafkaConsumer：批量消费</span>
+@KafkaListener(topics = <span class="s">"${hmdp.kafka.seckill-order.topic}"</span>,
+  groupId = <span class="s">"${hmdp.kafka.seckill-order.consumer-group}"</span>,
+  containerFactory = <span class="s">"seckillOrderKafkaListenerContainerFactory"</span>)
+public void onMessage(List&lt;SeckillOrderMessage&gt; messages, Acknowledgment acknowledgment) {
+    List&lt;VoucherOrder&gt; orders = consumerService.createOrders(messages);
+    acknowledgment.acknowledge(); <span class="c">// 创建订单事务成功后才提交 offset</span>
+    for (VoucherOrder order : orders) afterOrderCreated(order);
+}</pre><p>消费者配置为 <code>enable-auto-commit=false</code>、批量监听、<code>AckMode.MANUAL</code>。业务异常时不 ACK，框架按固定退避重试 3 次；仍失败会同步写入 DLT。DLT 消费者尝试将 Outbox 事件重新入队，彻底失败则标记人工核对。</p><h3>6.1 消费端幂等：重复消息不会重复建单或重复扣 DB 库存</h3><pre><span class="c">// VoucherOrderPersistenceServiceImpl：按券分组，批量 INSERT IGNORE</span>
+int inserted = voucherOrderMapper.batchInsertIgnore(orders);
+if (inserted &lt; orders.size()) verifyIgnoredOrdersExist(orders);
+if (inserted == <span class="n">0</span>) continue; <span class="c">// 本批全是重复投递，不再扣库存</span>
+
+int updated = voucherOrderMapper.decrementStock(voucherId, inserted);
+if (updated != <span class="n">1</span>) throw new DatabaseStockMismatchException(voucherId, inserted);</pre><p>数据库用订单唯一约束（用户 + 券）和订单 ID 约束兜底。第一次消息创建订单后，即使 Kafka 因 ACK 前宕机而重投，<code>INSERT IGNORE</code> 会忽略已存在订单；只有真正插入的数量才参与数据库库存扣减。</p><div class="callout ok"><strong>两层一人一单：</strong>Redis Set 负责高并发入口的快速拒绝；MySQL 唯一约束负责异步、重试、灾难恢复场景的最终兜底。不能只依赖 Redis，也不能只依赖 MySQL。</div></section>
+
+<section id="status"><h2>7. 状态查询、失败重试与人工核对</h2><pre><span class="c">// VoucherOrderServiceImpl.querySeckillOrderStatus() 的查找优先级</span>
+1. tb_voucher_order 有订单 → SUCCESS / CANCELLED
+2. tb_seckill_order_outbox 有事件 → PROCESSING / MANUAL_REVIEW
+3. Redis acceptedKey 有归属凭证 → PROCESSING
+4. 都没有 → 未受理或不存在</pre><p>这解释了为什么接口返回订单 ID：客户端不必盲目重复抢购，而是轮询状态。Handoff/Outbox 的存在让“已经接受、但尚未持久化”的订单有可解释状态。</p><details><summary>Kafka 消费多次失败时发生什么？</summary><p>订单消息进入 DLT 后，<code>SeckillAcceptedOrderRecoveryService</code> 先查询订单是否其实已落库：若已存在，直接将 Outbox 标记完成；若未存在，则按指数退避把该事件重新设为可投递。重入队也失败时标为 <code>MANUAL_REVIEW</code>，定时任务每 5 秒尝试恢复人工核对项。因为用户资格已经在 Lua 中被接受，不能简单回滚资格并告诉用户失败。</p></details></section>
+
+<section id="reconcile"><h2>8. 为什么仍需对账补偿：重试解决单点失败，对账修复状态漂移</h2><p class="lead">重试只知道“某一步报错了”。现实中还会出现进程崩溃、Redis 数据丢失/重启、Handoff 与 Outbox 删除时序、人工处理等无法由单次重试覆盖的状态漂移。因此项目定时以 MySQL 的订单与 Outbox 为权威，重建 Redis 秒杀投影。</p><h3>8.1 对账时如何计算正确库存</h3><pre><span class="c">// SeckillOrderReconciliationService.reconcileVoucher()</span>
+List&lt;Event&gt; unpersisted = outboxMapper.findUnpersistedEvents(voucherId);
+reservedOrderIds.addAll(unpersisted.orderId);       <span class="c">// 已受理但还没订单的预留</span>
+purchasedUserIds.addAll(voucherOrderMapper.findActiveUserIds(voucherId)); <span class="c">// 已落库用户</span>
+int handoffOnly = mergeHandoffReservations(...);    <span class="c">// Lua 成功、Outbox 尚未存在的窗口</span>
+int expectedStock = max(<span class="n">0</span>, mysqlVoucherStock - reservedOrderIds.size() - handoffOnly);</pre><p>它不能只用“已落库订单数”计算库存，否则已经 Lua 预扣、正在 Handoff/Outbox 排队的资格会被重新放回库存，导致超卖。对账把三类占用都纳入：</p><table><thead><tr><th>来源</th><th>表示什么</th><th>是否扣除 Redis 可售库存</th></tr></thead><tbody><tr><td>MySQL 已创建订单</td><td>最终持久化购买者</td><td>是，并重建到已购 Set。</td></tr><tr><td>Outbox PENDING/SENT/MANUAL_REVIEW 且未落库</td><td>已接受、等待持久化的预留</td><td>是。</td></tr><tr><td>仅在 Handoff 的记录</td><td>Lua 成功、尚未写入 Outbox 的临时预留</td><td>是。</td></tr></tbody></table><h3>8.2 重建时为什么要暂停新预扣</h3><pre><span class="c">-- seckill.lua 开头：对账锁存在即拒绝新请求</span>
+if redis.call(<span class="s">'exists'</span>, recoveryKey) == <span class="n">1</span> then return <span class="n">8</span> end
+
+<span class="c">-- seckill_rebuild.lua：确认恢复 token 后，原子替换库存和已购用户集合</span>
+redis.call(<span class="s">'SET'</span>, stockKey, expectedStock)
+redis.call(<span class="s">'DEL'</span>, orderKey)
+redis.call(<span class="s">'RENAME'</span>, stagingOrderKey, orderKey)
+redis.call(<span class="s">'DEL'</span>, recoveryKey)</pre><p>若对账时仍允许新的 Lua 预扣，快照计算与新请求会交叉，重建可能覆盖刚刚发生的扣减。因此每张券有独立 <code>recoveryKey</code> 租约；重建期间请求得到“秒杀数据正在恢复，请稍后重试”。先把用户集合写入 staging key，再通过 Lua 原子替换，避免消费者看到半成品集合。</p><div class="callout danger"><strong>权威边界：</strong>Redis 是高并发准入投影，MySQL 的订单和 Outbox 是最终可恢复事实。对账不是常规成功路径，而是处理 Redis 重启、部分失败和长尾事件后的最终收敛机制。</div></section>
+
+<section id="interview"><h2>9. 面试复述与高频追问</h2><div class="callout ok"><p><strong>90 秒版本：</strong>秒杀入口先通过 Nginx 对 IP 粗限流，保护 Java 和 Redis；进入应用后，使用 Redis Lua 同时执行“券维度的 IP 桶、用户桶”，并结合 Outbox 积压动态收紧容量。用户先获取短期资格令牌，正式下单时 Lua 在同一原子边界内校验活动、库存、重复购买和令牌，再完成库存预扣、用户已购标记，并写入 Redis Handoff。Handoff 用于保护 Redis 预扣成功到 MySQL Outbox 落库之间的崩溃窗口；后台 Relay 将它可靠转存为 Outbox。Outbox Relay 使用 MySQL 租约抢占事件，Kafka 以 voucherId 分区发送，消费者在本地事务中批量 INSERT IGNORE 订单、按真实插入量扣数据库库存，并在成功后手动 ACK。整条链路按至少一次设计，重复投递通过 Redis Set、MySQL 唯一约束和幂等落库处理；DLT、恢复任务与定时对账负责处理长尾失败和 Redis 投影漂移。</p></div><p class="q">Q：既然有 Outbox，为什么还需要 Handoff？</p><p>Outbox 必须先写入 MySQL，但 Lua 的 Redis 预扣已成功时，应用可能在写 Outbox 前宕机。Handoff 是这段跨存储事务间隙的临时、可恢复记录；没有它，资格已占用却没有可投递事件。</p><p class="q">Q：为什么不能承诺“消息一定成功、一定只消费一次”？</p><p>Kafka 确认后、更新 Outbox 状态前宕机必然可能造成重发。项目选择至少一次投递，把正确性建立在幂等消费之上；这是更可靠的工程取舍。</p><p class="q">Q：数据库库存和 Redis 库存为什么都要扣？</p><p>Redis 库存是高并发实时准入的投影，确保不超卖；MySQL 库存与订单是最终持久化事实。异步阶段有短暂差异是正常的；靠 Outbox、重试与对账最终一致，而不是假装两者能原子同时更新。</p></section>
+<footer>代码依据：当前工作区的 Nginx 配置、VoucherOrderController、SeckillRateLimitServiceImpl、seckill.lua、SeckillOrderHandoffRelay、SeckillOrderOutboxRelay、SeckillOrderKafkaConsumer、SeckillOrderReconciliationService 等。生成于 2026-10-21。</footer>
+</main></body></html>

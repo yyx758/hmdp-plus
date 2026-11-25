@@ -35,6 +35,8 @@ public class SeckillOrderOutboxEvent {
     private LocalDateTime updatedTime;
     private LocalDateTime sentTime;
     private LocalDateTime completedTime;
+    private String reviewOwner;
+    private LocalDateTime reviewDeadline;
 
     public static SeckillOrderOutboxEvent pending(
             Long orderId, Long voucherId, Long userId, boolean autoIssued) {

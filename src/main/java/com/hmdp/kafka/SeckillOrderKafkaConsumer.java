@@ -5,8 +5,8 @@ import com.hmdp.kafka.message.SeckillOrderMessage;
 import com.hmdp.kafka.outbox.SeckillOrderOutboxEvent;
 import com.hmdp.mapper.SeckillOrderOutboxMapper;
 import com.hmdp.service.ISeckillTopBuyerService;
-import com.hmdp.service.SeckillAcceptedOrderRecoveryService;
 import com.hmdp.service.SeckillOrderConsumerService;
+import com.hmdp.service.SeckillOrderReceiptService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
@@ -21,17 +21,17 @@ public class SeckillOrderKafkaConsumer {
     private final SeckillOrderConsumerService consumerService;
     private final SeckillOrderOutboxMapper outboxMapper;
     private final ISeckillTopBuyerService topBuyerService;
-    private final SeckillAcceptedOrderRecoveryService acceptedOrderRecoveryService;
+    private final SeckillOrderReceiptService receiptService;
 
     public SeckillOrderKafkaConsumer(
             SeckillOrderConsumerService consumerService,
             SeckillOrderOutboxMapper outboxMapper,
             ISeckillTopBuyerService topBuyerService,
-            SeckillAcceptedOrderRecoveryService acceptedOrderRecoveryService) {
+            SeckillOrderReceiptService receiptService) {
         this.consumerService = consumerService;
         this.outboxMapper = outboxMapper;
         this.topBuyerService = topBuyerService;
-        this.acceptedOrderRecoveryService = acceptedOrderRecoveryService;
+        this.receiptService = receiptService;
     }
 
     @KafkaListener(
@@ -66,18 +66,31 @@ public class SeckillOrderKafkaConsumer {
             throw new IllegalStateException(
                     "Outbox event for dead letter is missing, orderId=" + message.getOrderId());
         }
-        try {
-            acceptedOrderRecoveryService.retry(event,
-                    "Kafka consumption retries exhausted; accepted order is queued again");
-        } catch (RuntimeException e) {
-            outboxMapper.markManualReview(message.getOrderId(),
-                    "Failed to requeue accepted order: " + e.getMessage());
-            log.error("Failed to requeue accepted seckill order; manual review required, orderId={}",
-                    message.getOrderId(), e);
+        if (!event.getUserId().equals(message.getUserId())
+                || !event.getVoucherId().equals(message.getVoucherId())) {
+            throw new IllegalStateException(
+                    "Dead-letter identity conflicts with Outbox, orderId=" + message.getOrderId());
         }
+        if (SeckillOrderOutboxEvent.STATUS_COMPLETED.equals(event.getStatus())) {
+            return;
+        }
+        int parked = outboxMapper.markManualReview(message.getOrderId(),
+                "Kafka consumption retries exhausted; accepted order requires review");
+        if (parked != 1) {
+            throw new IllegalStateException(
+                    "Could not park accepted order for review, orderId=" + message.getOrderId());
+        }
+        log.error("Accepted seckill order parked for manual review, orderId={}",
+                message.getOrderId());
     }
 
     private void afterOrderCreated(VoucherOrder order) {
+        try {
+            receiptService.markSuccess(order);
+        } catch (RuntimeException e) {
+            log.error("Could not refresh accepted-order receipt after commit, orderId={}",
+                    order.getId(), e);
+        }
         try {
             topBuyerService.recordSuccessfulOrder(order);
         } catch (RuntimeException e) {

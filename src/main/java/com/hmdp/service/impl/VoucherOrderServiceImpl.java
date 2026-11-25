@@ -18,12 +18,14 @@ import com.hmdp.service.IUserNotificationService;
 import com.hmdp.service.IVoucherOrderService;
 import com.hmdp.service.SeckillOrderHandoffService;
 import com.hmdp.service.SeckillOrderOutboxService;
+import com.hmdp.service.SeckillOrderReceiptService;
 import com.hmdp.service.SeckillVoucherCacheService;
 import com.hmdp.service.OrderIdGenerator;
 import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
@@ -40,6 +42,7 @@ import java.util.Arrays;
 import java.util.Collections;
 
 import static com.hmdp.utils.RedisConstants.SECKILL_ORDER_ACCEPTED_KEY;
+import static com.hmdp.utils.RedisConstants.SECKILL_ORDER_ACCEPTED_USER_KEY;
 
 @Slf4j
 @Service
@@ -67,6 +70,8 @@ public class VoucherOrderServiceImpl
     private SeckillOrderOutboxMapper outboxMapper;
     @Resource
     private SeckillOrderHandoffService handoffService;
+    @Resource
+    private SeckillOrderReceiptService receiptService;
     @Resource
     private SeckillVoucherMapper seckillVoucherMapper;
     @Resource
@@ -111,14 +116,18 @@ public class VoucherOrderServiceImpl
                     tokenEnabled ? "1" : "0");
         } catch (RuntimeException e) {
             log.error("执行秒杀Lua时Redis连接中断，结果无法确认，orderId={}", orderId, e);
-            return Result.fail("抢购结果未确认，请重新获取资格令牌后重试",
+            return Result.fail("抢购结果未确认，请按订单号查询或刷新页面",
                     new SeckillOrderStatusDTO()
                             .setOrderId(orderId)
-                            .setStatus(SeckillOrderStatus.PROCESSING.name())
+                            .setStatus(SeckillOrderStatus.UNKNOWN.name())
                             .setMessage("Redis执行结果未确认"));
         }
         if (code == null) {
-            return Result.fail("秒杀服务繁忙，请稍后重试");
+            return Result.fail("抢购结果未确认，请按订单号查询或刷新页面",
+                    new SeckillOrderStatusDTO()
+                            .setOrderId(orderId)
+                            .setStatus(SeckillOrderStatus.UNKNOWN.name())
+                            .setMessage("Redis执行结果未确认"));
         }
         if (code != 0L) {
             return Result.fail(resolveFailureMessage(code.intValue()));
@@ -131,17 +140,17 @@ public class VoucherOrderServiceImpl
                 outboxService.completeHandoff(event);
             } catch (RuntimeException e) {
                 log.error("写入秒杀订单Outbox失败，等待Handoff确认，orderId={}", orderId, e);
-                return Result.fail("抢券结果暂未确认，请稍后按订单ID查询",
+                return Result.ok(
                         new SeckillOrderStatusDTO()
                                 .setOrderId(orderId)
                                 .setStatus(SeckillOrderStatus.PROCESSING.name())
-                                .setMessage("抢券结果正在确认中"));
+                                .setMessage("资格已锁定，订单处理中"));
             }
         }
         return Result.ok(new SeckillOrderStatusDTO()
                 .setOrderId(orderId)
-                .setStatus(SeckillOrderStatus.SUCCESS.name())
-                .setMessage("抢券成功"));
+                .setStatus(SeckillOrderStatus.PROCESSING.name())
+                .setMessage("资格已锁定，订单处理中"));
     }
 
     @Override
@@ -155,7 +164,18 @@ public class VoucherOrderServiceImpl
             return Result.fail("订单ID不能为空");
         }
         Long userId = UserHolder.getUser().getId();
-        VoucherOrder order = getById(orderId);
+        VoucherOrder order;
+        SeckillOrderOutboxEvent outbox;
+        boolean mysqlUnavailable = false;
+        try {
+            order = getById(orderId);
+            outbox = order == null ? outboxMapper.findByOrderId(orderId) : null;
+        } catch (DataAccessException e) {
+            log.warn("查询秒杀订单时MySQL暂不可用，尝试Redis受理凭证，orderId={}", orderId, e);
+            order = null;
+            outbox = null;
+            mysqlUnavailable = true;
+        }
         if (order != null) {
             if (!userId.equals(order.getUserId())) {
                 return Result.fail("订单处理结果不存在");
@@ -166,7 +186,6 @@ public class VoucherOrderServiceImpl
                     cancelled ? "订单已取消" : "订单创建成功"));
         }
 
-        SeckillOrderOutboxEvent outbox = outboxMapper.findByOrderId(orderId);
         if (outbox != null) {
             if (!userId.equals(outbox.getUserId())) {
                 return Result.fail("订单处理结果不存在");
@@ -179,18 +198,43 @@ public class VoucherOrderServiceImpl
                     "订单正在排队处理中"));
         }
 
-        Object acceptedValue = stringRedisTemplate.opsForHash().get(
-                SECKILL_ORDER_ACCEPTED_KEY, orderId.toString());
+        Object acceptedValue;
+        try {
+            acceptedValue = stringRedisTemplate.opsForHash().get(
+                    SECKILL_ORDER_ACCEPTED_KEY, orderId.toString());
+        } catch (RuntimeException e) {
+            if (mysqlUnavailable) {
+                log.warn("MySQL与Redis均无法确认秒杀状态，orderId={}", orderId, e);
+                return Result.ok(status(orderId, SeckillOrderStatus.UNKNOWN,
+                        "结果暂未确认，请稍后查询"));
+            }
+            throw e;
+        }
         String accepted = acceptedValue == null ? null : acceptedValue.toString();
         if (accepted != null) {
             String[] parts = accepted.split("\\|", -1);
-            if (parts.length != 2 || !userId.toString().equals(parts[0])) {
+            if ((parts.length != 2 && parts.length != 4)
+                    || !userId.toString().equals(parts[0])) {
                 return Result.fail("订单处理结果不存在");
             }
+            if (parts.length == 4) {
+                if (SeckillOrderStatus.SUCCESS.name().equals(parts[3])) {
+                    return Result.ok(status(orderId, SeckillOrderStatus.SUCCESS,
+                            "订单创建成功"));
+                }
+                if (SeckillOrderStatus.CANCELLED.name().equals(parts[3])) {
+                    return Result.ok(status(orderId, SeckillOrderStatus.CANCELLED,
+                            "订单已取消"));
+                }
+            }
             return Result.ok(status(orderId, SeckillOrderStatus.PROCESSING,
-                    "订单正在排队处理中"));
+                    "资格已锁定，订单处理中"));
         }
 
+        if (mysqlUnavailable) {
+            return Result.ok(status(orderId, SeckillOrderStatus.UNKNOWN,
+                    "结果暂未确认，请稍后查询"));
+        }
         return Result.fail("订单处理结果不存在或尚未完成可靠受理");
     }
 
@@ -205,8 +249,35 @@ public class VoucherOrderServiceImpl
     @Override
     public Result queryActiveOrderId(Long voucherId) {
         Long userId = UserHolder.getUser().getId();
-        VoucherOrder order = getBaseMapper().selectActiveOrder(userId, voucherId);
-        return Result.ok(order == null ? null : order.getId());
+        boolean mysqlUnavailable = false;
+        try {
+            VoucherOrder order = getBaseMapper().selectActiveOrder(userId, voucherId);
+            if (order != null) {
+                return Result.ok(order.getId().toString());
+            }
+        } catch (DataAccessException e) {
+            mysqlUnavailable = true;
+            log.warn("查询有效秒杀订单时MySQL暂不可用，尝试Redis受理索引，voucherId={}",
+                    voucherId, e);
+        }
+        Object orderId = stringRedisTemplate.opsForHash().get(
+                SECKILL_ORDER_ACCEPTED_USER_KEY + voucherId, userId.toString());
+        if (orderId == null) {
+            return Result.ok(null);
+        }
+        if (!mysqlUnavailable) {
+            try {
+                VoucherOrder indexedOrder = getBaseMapper().selectById(Long.valueOf(orderId.toString()));
+                if (indexedOrder != null && (Integer.valueOf(4).equals(indexedOrder.getStatus())
+                        || !userId.equals(indexedOrder.getUserId())
+                        || !voucherId.equals(indexedOrder.getVoucherId()))) {
+                    return Result.ok(null);
+                }
+            } catch (DataAccessException e) {
+                log.warn("核实Redis受理索引时MySQL暂不可用，voucherId={}", voucherId, e);
+            }
+        }
+        return Result.ok(orderId.toString());
     }
 
     @Override
@@ -256,6 +327,11 @@ public class VoucherOrderServiceImpl
     }
 
     private void afterOrderCancelled(VoucherOrder order) {
+        try {
+            receiptService.markCancelled(order);
+        } catch (RuntimeException e) {
+            log.error("取消订单后更新Redis受理状态失败，orderId={}", order.getId(), e);
+        }
         try {
             seckillTopBuyerService.rollbackCancelledOrder(order);
             seckillSubscriptionService.clearPurchased(order);

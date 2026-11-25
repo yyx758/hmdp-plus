@@ -9,7 +9,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scripting.support.ResourceScriptSource;
 import org.springframework.stereotype.Service;
 
@@ -26,10 +25,10 @@ import static com.hmdp.utils.RedisConstants.SECKILL_RECONCILIATION_LEADER_KEY;
 import static com.hmdp.utils.RedisConstants.SECKILL_ORDER_KEY;
 
 /**
- * Redis 秒杀事实投影的恢复与对账。
+ * 仅供人工灾难恢复的 Redis 状态重建工具。
  *
- * <p>MySQL 订单和 Outbox 是权威数据，Handoff 只覆盖 Lua 成功但 Outbox 尚未落库的窗口。
- * 重建库存时扣除未落单 Outbox 与仅存在于 Handoff 的预留，并同步重建已购用户集合。</p>
+ * <p>定时对账由只读审计服务执行。调用此工具前必须人工核实受理流水完整性，
+ * 否则可能覆盖已向用户确认但尚未落库的 Redis 预留。</p>
  */
 @Slf4j
 @Service
@@ -74,9 +73,7 @@ public class SeckillOrderReconciliationService {
         this.redisUserBatchSize = Math.max(1, redisUserBatchSize);
     }
 
-    @Scheduled(
-            cron = "${hmdp.kafka.seckill-order.reconciliation.cron:0 0 2,8,14,20 * * ?}",
-            zone = "${hmdp.kafka.seckill-order.reconciliation.zone:Asia/Shanghai}")
+    /** Manual disaster-recovery operation only; never run on a timer. */
     public void reconcileAll() {
         String token = UUID.randomUUID().toString();
         Boolean locked = stringRedisTemplate.opsForValue().setIfAbsent(

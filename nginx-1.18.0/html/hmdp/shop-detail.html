@@ -111,13 +111,16 @@
         <div v-if="v.type" class="seckill-box">
           <div
               class="voucher-btn"
-              :class="{'disable-btn': isNotBegin(v) || v.stock < 1 || isPurchased(v.id) || seckillInProgress}"
+              :class="{'disable-btn': isNotBegin(v) || v.stock < 1 || isPurchased(v.id) || isProcessing(v.id) || seckillInProgress}"
               @click="seckill(v)">限时抢购</div>
           <div class="seckill-stock">剩余 <span>{{v.stock}}</span> 张</div>
           <div class="seckill-time">{{formatTime(v)}}</div>
           <div v-if="isPurchased(v.id)" class="seckill-status">
             <span class="purchased-tag">已领取</span>
             <span class="cancel-link" @click.stop="cancelVoucher(v)">取消领取</span>
+          </div>
+          <div v-else-if="isProcessing(v.id)" class="seckill-status">
+            <span class="purchased-tag">{{processingMap[String(v.id)].status === 'MANUAL_REVIEW' ? '核查中' : '订单处理中'}}</span>
           </div>
           <div v-else-if="Number(v.stock) < 1" class="subscribe-box">
             <div v-if="isSubscribed(v.id)" class="subscribe-status">
@@ -211,6 +214,7 @@
       shop: {},
       vouchers: [],
       purchasedMap: {},
+      processingMap: {},
       subscribeStatusMap: {},
       topBuyers: [],
       seckillInProgress: false,
@@ -287,6 +291,9 @@
       isPurchased(voucherId){
         return !!this.purchasedMap[String(voucherId)];
       },
+      isProcessing(voucherId){
+        return !!this.processingMap[String(voucherId)];
+      },
       isSubscribed(voucherId){
         return Number(this.subscribeStatusMap[String(voucherId)] || 0) === 1;
       },
@@ -295,7 +302,21 @@
           if(!v || !v.id) return;
           return axios.get("/voucher-order/voucher/" + v.id)
           .then(({data}) => {
-            this.$set(this.purchasedMap, String(v.id), !!data);
+            if(!data){
+              this.$set(this.purchasedMap, String(v.id), false);
+              this.$delete(this.processingMap, String(v.id));
+              return;
+            }
+            return axios.get("/voucher-order/seckill/status/" + data)
+            .then(({data: orderStatus}) => {
+              const status = orderStatus || {};
+              this.$set(this.purchasedMap, String(v.id), status.status === "SUCCESS");
+              if(status.status === "PROCESSING" || status.status === "MANUAL_REVIEW" || status.status === "UNKNOWN"){
+                this.$set(this.processingMap, String(v.id), {orderId: data, status: status.status});
+              } else {
+                this.$delete(this.processingMap, String(v.id));
+              }
+            });
           })
           .catch(() => {});
         }));
@@ -332,7 +353,7 @@
           this.$message.error("库存不足，请刷新再试试！")
           return;
         }
-        if(this.isPurchased(v.id) || this.seckillInProgress){
+        if(this.isPurchased(v.id) || this.isProcessing(v.id) || this.seckillInProgress){
           return;
         }
         let id = v.id;
@@ -350,14 +371,23 @@
           const order = accepted && accepted.data;
           const orderId = order && (typeof order === "object" ? order.orderId : order);
           if (!orderId) {
-            this.$message.success("抢购成功，订单正在处理中");
-            this.$set(this.purchasedMap, String(v.id), true);
-            await this.queryVoucher(this.shop.id);
+            this.$message.warning("受理结果未确认，请稍后刷新查询");
             return;
           }
+          this.$set(this.processingMap, String(v.id), {orderId, status: "PROCESSING"});
+          this.$message.info("资格已锁定，订单处理中");
           await this.pollSeckillOrder(orderId, v);
         } catch (error) {
-          this.$message.error(error || "抢购失败");
+          await this.refreshPurchaseStatus();
+          const pending = this.processingMap[String(v.id)];
+          if(pending){
+            this.$message.warning("抢购请求结果待确认，订单号：" + pending.orderId);
+          } else if(error === "请求超时，请稍后重试" || error === "服务器异常" ||
+                    String(error).indexOf("未确认") >= 0){
+            this.$message.warning("抢购结果暂未确认，请稍后刷新查询");
+          } else {
+            this.$message.error(error || "抢购失败");
+          }
         } finally {
           this.seckillInProgress = false;
           loading.close();
@@ -372,27 +402,31 @@
             if(status.status === "SUCCESS" || status.status === "DUPLICATE_EXISTING"){
               this.$message.success(status.message || "抢购成功");
               this.$set(this.purchasedMap, String(voucher.id), true);
+              this.$delete(this.processingMap, String(voucher.id));
               await this.queryVoucher(this.shop.id);
               return;
             }
             if(status.status === "MANUAL_REVIEW"){
+              this.$set(this.processingMap, String(voucher.id), {orderId, status: "MANUAL_REVIEW"});
               this.$message.warning(status.message || "订单正在人工核对");
               return;
             }
             if(status.status === "CANCELLED"){
+              this.$delete(this.processingMap, String(voucher.id));
               this.$message.info("订单已取消");
               return;
             }
           } catch (ignored) {}
           await new Promise(resolve => setTimeout(resolve, 700));
         }
-        this.$message.warning("订单仍在处理中，请稍后查看通知");
+        this.$message.warning("订单仍在处理中，订单号：" + orderId + "；刷新页面可继续查询");
       },
       async cancelVoucher(v){
         try {
           await this.$confirm("取消后库存将回流，确认取消？", "取消领取", {type: "warning"});
           await axios.post("/voucher-order/cancel", {voucherId: v.id});
           this.$set(this.purchasedMap, String(v.id), false);
+          this.$delete(this.processingMap, String(v.id));
           this.$message.success("已取消领取");
           await this.queryVoucher(this.shop.id);
         } catch (error) {
@@ -401,7 +435,7 @@
             // eligibility. Repair any stale local state from the active order.
             try {
               const result = await axios.get("/voucher-order/voucher/" + v.id);
-              this.$set(this.purchasedMap, String(v.id), !!result.data);
+              await this.refreshPurchaseStatus();
               if(!result.data) {
                 await this.queryVoucher(this.shop.id);
                 await this.refreshPurchaseStatus();

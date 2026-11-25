@@ -76,16 +76,22 @@ public class VoucherOrderPersistenceServiceImpl implements IVoucherOrderPersiste
 
     private void verifyIgnoredOrdersExist(List<VoucherOrder> orders) {
         for (VoucherOrder order : orders) {
-            Long existingOrderId = voucherOrderMapper.selectOrderId(
-                    order.getUserId(), order.getVoucherId()
-            );
-            if (existingOrderId == null) {
-                throw new IllegalStateException("订单被忽略但不存在对应业务订单，可能发生订单ID冲突，orderId="
-                        + order.getId());
+            VoucherOrder persisted = voucherOrderMapper.selectById(order.getId());
+            if (persisted != null) {
+                if (!order.getUserId().equals(persisted.getUserId())
+                        || !order.getVoucherId().equals(persisted.getVoucherId())) {
+                    throw new IllegalStateException("订单ID对应的用户或优惠券不一致，orderId="
+                            + order.getId());
+                }
+                continue;
             }
-            if (!order.getId().equals(existingOrderId)) {
+            Long existingOrderId = voucherOrderMapper.selectOrderId(
+                    order.getUserId(), order.getVoucherId());
+            if (existingOrderId != null) {
                 throw new OrderIdConflictException(order.getId(), existingOrderId);
             }
+            throw new IllegalStateException("订单被忽略但不存在对应业务订单，orderId="
+                    + order.getId());
         }
     }
 }

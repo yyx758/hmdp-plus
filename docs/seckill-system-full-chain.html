@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>秒杀系统全链路｜Redis · Outbox · Kafka · 对账补偿</title>
+  <style>
+    :root{--ink:#172738;--muted:#607386;--line:#dbe3e9;--bg:#f5f7f8;--paper:#fff;--navy:#0d2334;--navy2:#183a4e;--teal:#087e79;--tealsoft:#e5f5f2;--orange:#db683d;--orangesoft:#fff0e7;--blue:#366eaa;--bluesoft:#eaf2fb;--red:#b9484a;--redsoft:#fcecee;--shadow:0 14px 42px rgba(19,41,59,.08)}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.78 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif}button{font:inherit}a{color:inherit;text-decoration:none}a:hover{color:var(--teal)}:focus-visible{outline:3px solid #ed9b66;outline-offset:3px}::selection{background:#c5ebe3}
+    .layout{display:grid;grid-template-columns:252px minmax(0,1fr);min-height:100vh}.sidebar{position:sticky;top:0;height:100vh;overflow:auto;background:#102838;color:#dce7eb;padding:28px 18px 24px;border-right:1px solid #254557}.brand{padding:4px 11px 25px;border-bottom:1px solid #315063;margin-bottom:18px}.brand-icon{display:inline-grid;place-items:center;width:31px;height:31px;border-radius:9px;background:var(--orange);color:white;font-weight:800;margin-right:9px}.brand strong{font-size:16px;letter-spacing:.04em;color:#fff}.brand small{display:block;margin:10px 0 0 40px;color:#8fb0bd;font-size:11px;letter-spacing:.1em;text-transform:uppercase}.navgroup{font-size:10px;text-transform:uppercase;letter-spacing:.16em;color:#8eacb8;padding:19px 12px 6px}.navlink{display:flex;align-items:center;gap:11px;border-radius:10px;padding:9px 12px;color:#c8dce2;font-size:13px;transition:.18s}.navlink:hover,.navlink.active{background:#244657;color:#fff}.navlink.active{box-shadow:inset 3px 0 0 #ee8b5b}.navlink span{font:700 10px/1 ui-monospace,SFMono-Regular,Consolas,monospace;color:#81c7c0}.side-foot{margin:28px 9px 0;padding-top:15px;border-top:1px solid #315063;color:#8eacb8;font-size:11px;line-height:1.6}
+    .main{min-width:0}.hero{background:radial-gradient(circle at 84% 18%,rgba(27,125,124,.3),transparent 30%),radial-gradient(circle at 55% 90%,rgba(237,119,69,.13),transparent 36%),linear-gradient(118deg,#0e2637,#123144 62%,#113d4b);color:#fff;padding:58px clamp(28px,5.1vw,82px) 49px;overflow:hidden;position:relative}.hero:after{content:"";position:absolute;width:390px;height:390px;border:1px solid rgba(221,242,240,.1);border-radius:50%;right:-120px;top:-160px;box-shadow:0 0 0 70px rgba(225,244,241,.035),0 0 0 140px rgba(225,244,241,.025);pointer-events:none}.eyebrow{display:flex;align-items:center;gap:10px;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#86d7c9;font-weight:700}.eyebrow:before{content:"";width:24px;height:2px;background:var(--orange)}h1{font-size:clamp(34px,4.6vw,60px);letter-spacing:-.045em;line-height:1.22;margin:22px 0 14px;max-width:900px}h1 em{font-style:normal;color:#8bd9cd}.hero p{max-width:760px;color:#bdd2dc;font-size:16px;margin:0}.hero-meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:29px}.hero-meta span{border:1px solid rgba(190,220,221,.22);border-radius:999px;background:rgba(255,255,255,.055);padding:5px 12px;font-size:11px;color:#dce8e9}.hero-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:41px;max-width:880px}.hero-stat{border-top:1px solid rgba(197,225,223,.3);padding-top:12px}.hero-stat strong{display:block;font-size:20px;line-height:1.4}.hero-stat small{color:#a6c2cb;font-size:11px}
+    .content{max-width:1260px;margin:auto;padding:0 clamp(25px,5vw,76px) 90px}.section{scroll-margin-top:25px;margin-top:64px}.section-top{display:flex;align-items:center;gap:12px;margin-bottom:7px}.section-num{font:700 12px/1 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--orange);letter-spacing:.08em}.section-line{height:1px;background:#cad9df;flex:1}.section h2{font-size:clamp(24px,2.8vw,35px);line-height:1.28;letter-spacing:-.035em;margin:6px 0 12px}.lead{font-size:15px;color:var(--muted);max-width:890px;margin:0 0 23px}.card{background:var(--paper);border:1px solid var(--line);border-radius:17px;box-shadow:var(--shadow)}.pad{padding:25px}.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:15px}.grid4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.kicker{font:700 11px ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.1em;color:var(--teal);text-transform:uppercase}.card h3{font-size:17px;line-height:1.35;margin:7px 0 7px}.card p{margin:0;color:var(--muted);font-size:13px}.pill{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:3px 9px;font-size:11px;font-weight:700;white-space:nowrap}.pill.teal{background:var(--tealsoft);color:#096b68}.pill.orange{background:var(--orangesoft);color:#ad512e}.pill.red{background:var(--redsoft);color:#ae4244}.pill.blue{background:var(--bluesoft);color:#316593}.pill.gray{background:#e9eef0;color:#526674}.callout{border-radius:14px;padding:19px 21px;margin:19px 0;border:1px solid}.callout strong{display:block;margin-bottom:4px}.callout p{margin:0;font-size:13px}.callout.teal{background:#eaf7f3;border-color:#b8e3d8}.callout.orange{background:#fff3e9;border-color:#f2d2b9}.callout.red{background:#fff0f0;border-color:#efc9cc}.callout.navy{background:#eaf0f3;border-color:#c7d6dd}
+    .flow{background:#102737;color:#fff;padding:23px;border-radius:18px;box-shadow:var(--shadow)}.flow-title{display:flex;justify-content:space-between;gap:12px;color:#b9d4db;font-size:11px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:16px}.flowrow{display:flex;align-items:stretch;gap:5px}.flowbox{flex:1;min-width:0;background:#1e3b4d;border:1px solid #315769;border-radius:12px;padding:15px 12px;position:relative}.flowbox.highlight{background:#18554f;border-color:#3b8f82}.flowbox.end{background:#744534;border-color:#a36b51}.flowbox b{display:block;font-size:13px;line-height:1.35}.flowbox small{display:block;margin-top:7px;color:#a6c6cc;font-size:11px;line-height:1.5}.flowarrow{display:grid;place-items:center;color:#f3a477;font-weight:800;min-width:17px}.flow-legend{display:flex;flex-wrap:wrap;gap:16px;margin-top:16px;color:#a9c5cc;font-size:11px}.flow-legend i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#70c9ba;margin-right:5px}.flow-legend .orange-dot{background:#ec986d}
+    .table-wrap{overflow:auto;background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}table{width:100%;border-collapse:collapse;min-width:690px}th{text-align:left;font-size:11px;letter-spacing:.05em;color:#526879;background:#eef3f5;padding:11px 15px;border-bottom:1px solid var(--line);white-space:nowrap}td{padding:13px 15px;border-bottom:1px solid #e8edf0;vertical-align:top;font-size:12.5px;line-height:1.62}tr:last-child td{border-bottom:0}tr:hover td{background:#fafcfc}td:first-child{font-weight:700;color:#1a3947}code,.mono{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace}code{font-size:.91em;background:#eef3f4;color:#14525d;border-radius:4px;padding:2px 4px;overflow-wrap:anywhere}.sql{background:#122d3d;color:#d9e9ee;border-radius:12px;padding:16px 18px;overflow:auto;font:12px/1.68 ui-monospace,SFMono-Regular,Consolas,monospace;margin:13px 0 0;white-space:pre}.sql .comment{color:#8eacb8}.sql .kw{color:#88d3c9}.sql .lit{color:#f1aa79}.tiny{font-size:11px;color:var(--muted)}
+    .timeline{position:relative;padding-left:32px}.timeline:before{content:"";position:absolute;left:12px;top:14px;bottom:16px;width:2px;background:#cadadf}.step{position:relative;padding:0 0 19px 10px}.step:last-child{padding-bottom:0}.step:before{content:attr(data-n);position:absolute;left:-29px;top:2px;width:24px;height:24px;display:grid;place-items:center;background:var(--teal);border:3px solid var(--bg);color:#fff;border-radius:50%;font:800 10px ui-monospace,SFMono-Regular,Consolas,monospace;box-sizing:content-box}.step h3{font-size:14px;margin:0 0 4px}.step p{font-size:12px;color:var(--muted);margin:0}.step .tag{color:var(--orange);font:700 11px ui-monospace,SFMono-Regular,Consolas,monospace}
+    .state-columns{display:grid;grid-template-columns:1fr 1fr;gap:16px}.statebox{padding:22px}.state-row{display:flex;gap:12px;align-items:start;border-bottom:1px dashed #d7e2e5;padding:12px 0}.state-row:last-child{border:0;padding-bottom:0}.state-row p{font-size:12px;margin:2px 0 0}.state-arrow{text-align:center;color:var(--teal);font-size:12px;padding:9px;font-weight:700;background:#ecf6f4;border-radius:9px;margin-top:11px}
+    .why{padding:24px;background:linear-gradient(115deg,#f4fbf8,#fff);border-left:4px solid var(--teal)}.why h3{margin-top:0}.why ol{margin:7px 0 0;padding-left:19px;color:#516a75;font-size:13px}.why li{margin:7px 0}.decision{display:grid;grid-template-columns:1fr 1fr;gap:12px}.decision-card{padding:18px;border-left:4px solid #6dbcb0}.decision-card.warn{border-color:#e5a06f}.decision-card.danger{border-color:#ca7776}.decision-card h3{margin:0 0 6px;font-size:14px}.decision-card p{font-size:12px}.decision-card .n{font:800 10px ui-monospace,SFMono-Regular,Consolas,monospace;color:#9aaab3;display:block;margin-bottom:7px}
+    .scenario-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:19px 0 14px}.scenario-tabs button{border:1px solid #cddce0;background:white;color:#47606d;border-radius:8px;padding:8px 11px;cursor:pointer;font-weight:700;font-size:12px;transition:.18s}.scenario-tabs button:hover{border-color:var(--teal);color:var(--teal)}.scenario-tabs button.active{background:var(--navy);border-color:var(--navy);color:white}.scenario-panel{background:#fff;border:1px solid #cbdce0;border-radius:16px;padding:24px;box-shadow:var(--shadow)}.scenario-panel h3{margin:0 0 6px;font-size:19px}.scenario-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:19px}.scenario-cell{background:#f2f6f7;border-radius:10px;padding:13px}.scenario-cell b{display:block;font-size:10px;letter-spacing:.06em;color:#57717e;margin-bottom:5px}.scenario-cell span{font-size:12px;color:#263f4b}.scenario-steps{margin:17px 0 0;padding-left:19px;font-size:13px}.scenario-steps li{margin:7px 0}
+    .mathbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0}.mathbar span{display:block;background:#ecf4f5;border:1px solid #d4e5e7;padding:12px 16px;border-radius:10px;font-size:12px}.mathbar strong{font-size:25px;display:block;line-height:1.25}.mathbar .op{background:none;border:0;font-size:24px;color:var(--teal);padding:0 4px}.rule-list{list-style:none;margin:0;padding:0}.rule-list li{padding:11px 0;border-bottom:1px solid #e5ecee;font-size:13px}.rule-list li:last-child{border:0}.rule-list b{color:var(--teal)}.source-list{display:grid;grid-template-columns:1fr 1fr;gap:9px}.source-list div{padding:11px 12px;background:#f3f7f8;border-radius:9px;font-size:11px;overflow-wrap:anywhere}.source-list b{display:block;font-size:12px;margin-bottom:2px}.source-list code{background:none;padding:0;color:#476574}.footer{margin-top:68px;padding:21px 0 0;border-top:1px solid #cddae0;color:#768b97;font-size:11px;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}.top-link{position:fixed;right:19px;bottom:18px;border:1px solid #c8d6db;background:white;box-shadow:var(--shadow);padding:7px 11px;border-radius:9px;color:#365363;font-size:12px;z-index:5}
+    @media(max-width:1100px){.layout{grid-template-columns:205px minmax(0,1fr)}.sidebar{padding-left:11px;padding-right:11px}.hero-stats{grid-template-columns:repeat(2,1fr)}.flowrow{flex-wrap:wrap}.flowbox{flex-basis:28%}.flowarrow{flex-basis:8px}}@media(max-width:750px){.layout{display:block}.sidebar{position:relative;width:auto;height:auto;overflow:visible;padding:13px}.brand{padding:3px 8px 8px;margin:0;border:0}.brand small,.navgroup,.side-foot{display:none}.nav{display:flex;overflow:auto;gap:3px;padding:0 3px}.navlink{white-space:nowrap;font-size:11px;padding:7px}.navlink span{display:none}.hero{padding:42px 24px}.hero-stats{grid-template-columns:repeat(2,1fr)}.content{padding:0 18px 65px}.section{margin-top:45px}.grid2,.grid3,.grid4,.state-columns,.decision,.source-list{grid-template-columns:1fr}.flowbox{flex-basis:42%}.scenario-grid{grid-template-columns:1fr}.top-link{bottom:10px;right:10px}}@media(max-width:480px){.flowrow{display:block}.flowarrow{height:23px;transform:rotate(90deg)}.flowbox{margin:0}.hero-stats{gap:7px}.hero-stat strong{font-size:17px}.pad{padding:18px}.mathbar .op{display:none}}
+    @media print{html{scroll-behavior:auto}body{background:#fff;color:#111;font-size:11px}.layout{display:block}.sidebar,.top-link,.scenario-tabs{display:none!important}.hero{padding:20px 26px;color:#111;background:#fff;border-bottom:2px solid #333}.hero p,.hero-meta span,.hero-stat small{color:#333}.hero h1{font-size:30px}.hero h1 em{color:#111}.hero-stats{margin-top:12px}.hero-stat{border-color:#777}.content{max-width:none;padding:0 26px}.section{margin-top:25px;break-inside:avoid-page}.card,.flow,.scenario-panel,.table-wrap{box-shadow:none;break-inside:avoid-page}.flow{-webkit-print-color-adjust:exact;print-color-adjust:exact}.scenario-panel{display:block}.footer{margin-top:25px}a{text-decoration:none}}
+  </style>
+</head>
+<body>
+<div class="layout" id="top">
+  <aside class="sidebar" aria-label="章节导航">
+    <div class="brand"><span class="brand-icon">秒</span><strong>秒杀链路手册</strong><small>HM-DIANPING / ENGINEERING</small></div>
+    <nav class="nav">
+      <div class="navgroup">系统设计</div>
+      <a class="navlink" href="#overview"><span>01</span>设计承诺</a>
+      <a class="navlink" href="#architecture"><span>02</span>全链路总览</a>
+      <a class="navlink" href="#redis"><span>03</span>Redis 结构</a>
+      <a class="navlink" href="#mysql"><span>04</span>MySQL 结构</a>
+      <a class="navlink" href="#states"><span>05</span>双层状态机</a>
+      <div class="navgroup">执行与恢复</div>
+      <a class="navlink" href="#path"><span>06</span>核心链路</a>
+      <a class="navlink" href="#reasons"><span>07</span>为何定时对账</a>
+      <a class="navlink" href="#audit"><span>08</span>逐单巡检设计</a>
+      <a class="navlink" href="#aggregate"><span>09</span>库存只读对账</a>
+      <a class="navlink" href="#failures"><span>10</span>故障推演</a>
+      <div class="navgroup">结论</div>
+      <a class="navlink" href="#consistency"><span>11</span>最终一致性</a>
+      <a class="navlink" href="#boundaries"><span>12</span>边界与决策</a>
+      <a class="navlink" href="#sources"><span>13</span>源码定位</a>
+    </nav>
+    <div class="side-foot">基于本项目 2026-11-14 的本地代码。<br>单文件 HTML · 可离线阅读与打印。</div>
+  </aside>
+  <main class="main">
+    <header class="hero">
+      <div class="eyebrow">Implementation field guide · v1.0</div>
+      <h1>一笔秒杀订单，<br><em>从预扣到落单。</em></h1>
+      <p>Redis 受理、Handoff、MySQL Outbox、Kafka、订单事务，以及逐单恢复与只读对账。把“什么时候可以向用户说成功”和“什么时候绝不能回补库存”放在同一张图里。</p>
+      <div class="hero-meta"><span>默认模式 redis-handoff</span><span>同一 orderId 贯穿全链路</span><span>预扣成功 ≠ 订单已创建</span><span>基于当前项目实现</span></div>
+      <div class="hero-stats"><div class="hero-stat"><strong>PROCESSING</strong><small>Redis Lua 成功后的用户状态</small></div><div class="hero-stat"><strong>60 秒</strong><small>首次逐单巡检到期时间</small></div><div class="hero-stat"><strong>5 分钟</strong><small>巡检领取后的再次检查租约</small></div><div class="hero-stat"><strong>只读</strong><small>定时库存汇总对账的写入权限</small></div></div>
+    </header>
+    <div class="content">
+      <section id="overview" class="section">
+        <div class="section-top"><span class="section-num">01 / CONTRACT</span><span class="section-line"></span></div><h2>先定义“成功”到底是什么</h2>
+        <p class="lead">用户的点击先在 Redis 锁定资格，订单在异步事务提交后才真正创建。两个事实由不同状态表达，不能因为 HTTP 请求成功就展示“订单已创建”。</p>
+        <div class="grid3">
+          <div class="card pad"><span class="kicker">Redis acceptance</span><h3>资格已锁定</h3><p>Lua 原子预扣、已购集合写入和 Handoff 留痕成功。接口返回 <code>orderId + PROCESSING</code>。</p></div>
+          <div class="card pad"><span class="kicker">MySQL commit</span><h3>订单创建成功</h3><p>订单插入、MySQL 库存扣减、Outbox 完成处于事务边界；事务提交后才展示 <code>SUCCESS</code>。</p></div>
+          <div class="card pad"><span class="kicker">Uncertain result</span><h3>结果未确认</h3><p>Lua 结果不确定或两侧都不可判定时返回 <code>UNKNOWN</code>；不能凭超时推断用户未抢到。</p></div>
+        </div>
+        <div class="callout orange"><strong>本链路的恢复方向：优先向前补单</strong><p>已告知用户“资格已锁定”的请求，不会因为 Kafka 死信、MySQL 暂时故障或库存差额而自动变成 <code>FAILED</code>。最终失败与释放资格仍是未启用的受控业务决策。</p></div>
+      </section>
+
+      <section id="architecture" class="section">
+        <div class="section-top"><span class="section-num">02 / MAP</span><span class="section-line"></span></div><h2>全链路：一笔订单只认一个 ID</h2>
+        <p class="lead">主流程故意允许消息重投。可靠性来自每个交接点可重试、每个写入点幂等，以及消费者提交和 ACK 的明确顺序。</p>
+        <div class="flow" role="img" aria-label="用户请求经 Redis Lua、Handoff、MySQL Outbox、Kafka、订单事务，最终查询成功；巡检从旁逐单恢复">
+          <div class="flow-title"><span>Fast admission → durable handoff → eventual order</span><span>同一 orderId</span></div>
+          <div class="flowrow"><div class="flowbox"><b>① 用户请求</b><small>先生成分布式 orderId<br>资格令牌 / 限流</small></div><div class="flowarrow">→</div><div class="flowbox highlight"><b>② Redis Lua</b><small>库存 −1、已购 SADD<br>Handoff + 受理凭证</small></div><div class="flowarrow">→</div><div class="flowbox"><b>③ Handoff Relay</b><small>批量幂等写入<br>MySQL Outbox</small></div><div class="flowarrow">→</div><div class="flowbox"><b>④ Outbox Relay</b><small>租约领取、发送 Kafka<br>失败退避 / SENT 重查</small></div><div class="flowarrow">→</div><div class="flowbox end"><b>⑤ Consumer</b><small>事务落单、扣 MySQL 库存<br>COMPLETED → ACK</small></div></div>
+          <div class="flow-legend"><span><i></i>Lua 成功即返回 PROCESSING</span><span><i class="orange-dot"></i>MySQL 事务提交后查询 SUCCESS</span><span>旁路：受理凭证 → 逐单巡检 → 原 orderId 补写 Outbox / 报警</span></div>
+        </div>
+      </section>
+
+      <section id="redis" class="section">
+        <div class="section-top"><span class="section-num">03 / DATA · REDIS</span><span class="section-line"></span></div><h2>Redis 结构：受理事实与恢复线索</h2>
+        <p class="lead">以下是默认用户秒杀路径的关键 Key。Lua 一次执行完成检查、预扣、占位和留痕；后续服务不靠“猜”一笔扣减属于谁。</p>
+        <div class="table-wrap"><table><thead><tr><th>Key / 类型</th><th>内容</th><th>作用与清理时机</th></tr></thead><tbody>
+          <tr><td><code>seckill:meta:{voucherId}</code><br><span class="tiny">Hash</span></td><td><code>beginTime / endTime / status</code></td><td>Lua 在预扣前检查活动窗口和上架状态。</td></tr>
+          <tr><td><code>seckill:stock:{voucherId}</code><br><span class="tiny">String</span></td><td>Redis 剩余可预留库存</td><td>Lua 成功时减 1；已受理任务异常时不自动加回。</td></tr>
+          <tr><td><code>seckill:order:{voucherId}</code><br><span class="tiny">Set</span></td><td>已占资格的 userId</td><td><code>SISMEMBER</code> 实现一人一单；用户主动取消才按既有流程移除。</td></tr>
+          <tr><td><code>seckill:access:token:{voucherId}:{userId}</code><br><span class="tiny">String</span></td><td>可选的前置资格令牌</td><td>启用时由同一 Lua 校验并消费；失败请求不预扣。</td></tr>
+          <tr><td><code>seckill:order:handoff:{voucherId}</code><br><span class="tiny">ZSet</span></td><td>score=受理毫秒；member=<code>orderId|userId|0</code></td><td>Redis→MySQL 的待交接任务。确认 Outbox 已提交后删除，崩溃前仍可重试。</td></tr>
+          <tr><td><code>seckill:order:accepted</code><br><span class="tiny">Hash</span></td><td>field=orderId；value=<code>userId|voucherId|acceptedAt|PROCESSING</code></td><td>归属校验、MySQL 故障时状态查询、丢失 Outbox 时的恢复凭证；终态后默认保留 7 天。</td></tr>
+          <tr><td><code>seckill:order:accepted:user:{voucherId}</code><br><span class="tiny">Hash</span></td><td>userId → 当前 orderId</td><td>响应丢失或页面刷新后，按用户和券找回在途订单号。</td></tr>
+          <tr><td><code>seckill:order:accepted:audit</code><br><span class="tiny">ZSet</span></td><td>orderId → 下次巡检毫秒</td><td>首次 score=受理时间+60 秒；领任务时改为当前时间+5 分钟；终态移除。</td></tr>
+          <tr><td><code>seckill:order:accepted:expire</code><br><span class="tiny">ZSet</span></td><td>终态 orderId → 清理时间</td><td>终态凭证保留期到期时批量清理 Hash 字段。</td></tr>
+        </tbody></table></div>
+        <div class="callout navy"><strong>原子性边界</strong><p>库存检查、一人一单、令牌消费、<code>DECR</code>、<code>SADD</code>、Handoff、受理凭证与巡检标记同处一个 Lua 脚本；正常返回码 0 才表示资格受理成功。脚本结果不确定时 API 返回 <code>UNKNOWN</code>。</p></div>
+      </section>
+
+      <section id="mysql" class="section">
+        <div class="section-top"><span class="section-num">04 / DATA · MYSQL</span><span class="section-line"></span></div><h2>MySQL 结构：交接记录、订单与人工轨迹</h2>
+        <div class="grid2">
+          <div class="card pad"><span class="kicker">tb_seckill_voucher</span><h3>最终交易库存</h3><p><code>voucher_id</code> 主键；<code>stock</code> 是 MySQL 端剩余库存。Consumer 只按本次实际新插入订单数扣减：<code>stock = stock - inserted</code>，并检查库存足够。</p></div>
+          <div class="card pad"><span class="kicker">tb_voucher_order</span><h3>订单事实</h3><p><code>id = orderId</code> 主键。生成列 <code>active_order_marker</code> 对非取消订单取 1、取消订单取 NULL；唯一键 <code>(user_id, voucher_id, active_order_marker)</code> 限制同用户同券至多一笔有效订单，同时允许取消后再买。</p></div>
+          <div class="card pad"><span class="kicker">tb_seckill_order_outbox</span><h3>可靠投递记录</h3><p><code>event_id</code> 与 <code>order_id</code> 分别唯一。保存 <code>status</code>、<code>retry_count</code>、<code>next_retry_time</code>、<code>last_error</code>、Relay 租约，以及人工核查责任队列和截止时间。</p></div>
+          <div class="card pad"><span class="kicker">tb_seckill_manual_review_action</span><h3>人工操作审计</h3><p>记录 <code>order_id</code>、操作人、动作、原因、时间。动作包含原单号重试、确认完成、申请失败审核；申请审核本身不会产生 <code>FAILED</code>。</p></div>
+        </div>
+        <pre class="sql"><span class="comment">-- 消费者同一事务里的核心约束，示意</span>
+<span class="kw">INSERT IGNORE INTO</span> tb_voucher_order(id, user_id, voucher_id) <span class="kw">VALUES</span> (...);
+<span class="comment">-- 被忽略时必须按 orderId 查历史订单并核对归属，包括已取消订单</span>
+<span class="kw">UPDATE</span> tb_seckill_voucher
+   <span class="kw">SET</span> stock = stock - :inserted
+ <span class="kw">WHERE</span> voucher_id = :voucherId <span class="kw">AND</span> stock &gt;= :inserted;
+<span class="comment">-- 只扣实际新插入数；失败就抛出并回滚整笔事务</span></pre>
+        <p class="tiny">迁移来源：V5/V6 建 Outbox 与 Relay 租约，V10 建人工动作表，V11 建有效订单唯一约束，V12 建人工责任与时限字段。</p>
+      </section>
+
+      <section id="states" class="section">
+        <div class="section-top"><span class="section-num">05 / STATES</span><span class="section-line"></span></div><h2>两套状态机，不互相冒充</h2>
+        <p class="lead">用户状态回答“向用户承诺了什么”，Outbox 状态回答“事件处理到哪一步”。<code>Result.ok</code> 只是接口受理成功，不能替代订单状态。</p>
+        <div class="state-columns">
+          <div class="card statebox"><span class="kicker">用户可见状态</span>
+            <div class="state-row"><span class="pill teal">PROCESSING</span><p>Redis 预扣成功，资格已锁定；MySQL 订单未确认提交。</p></div>
+            <div class="state-row"><span class="pill orange">MANUAL_REVIEW</span><p>自动消费受阻且任务停车；资格仍保留，等待人工核查。</p></div>
+            <div class="state-row"><span class="pill blue">SUCCESS</span><p>同一 orderId 的 MySQL 订单事务已提交。</p></div>
+            <div class="state-row"><span class="pill gray">CANCELLED</span><p>用户主动取消已创建订单；属于独立的取消流程。</p></div>
+            <div class="state-row"><span class="pill red">UNKNOWN</span><p>Redis 执行结果或状态数据暂不可判定；不能断言失败。</p></div>
+            <div class="state-row"><span class="pill red">FAILED · 未启用</span><p>需要终态规则、落单栅栏和幂等释放；当前代码没有自动进入该状态。</p></div>
+            <div class="state-arrow">PROCESSING → SUCCESS / MANUAL_REVIEW → SUCCESS →（用户取消）CANCELLED</div>
+          </div>
+          <div class="card statebox"><span class="kicker">Outbox 内部状态</span>
+            <div class="state-row"><span class="pill gray">PENDING</span><p>事件已持久化，等待 Publisher 按租约领取。</p></div>
+            <div class="state-row"><span class="pill blue">SENT</span><p>Kafka 已收到投递；尚需确认消费者已落单，允许重查和重投。</p></div>
+            <div class="state-row"><span class="pill teal">COMPLETED</span><p>消费者事务确认订单已处理。重复投递仍可 ACK，不再扣库。</p></div>
+            <div class="state-row"><span class="pill orange">MANUAL_REVIEW</span><p>死信处理后停车；不会被自动待投递查询再次领取。</p></div>
+            <div class="state-arrow">PENDING ⇄ SENT → COMPLETED；消费重试耗尽 → MANUAL_REVIEW → 人工重试 / 确认完成</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="path" class="section">
+        <div class="section-top"><span class="section-num">06 / EXECUTION</span><span class="section-line"></span></div><h2>正常链路，逐步看提交边界</h2>
+        <div class="card pad timeline">
+          <div class="step" data-n="1"><h3>生成 orderId，检查活动与访问资格</h3><p>默认订单号由数据库号段服务产生，不是 UUID；请求线程先拿 ID，便于后续查询和全链路幂等。</p></div>
+          <div class="step" data-n="2"><h3>Redis Lua 原子预扣并留痕 <span class="tag">FIRST COMMIT POINT</span></h3><p>库存 −1、已购集合加入用户，同时写 Handoff、受理凭证与巡检 ZSet。API 此时返回 <code>PROCESSING</code> 和 orderId。</p></div>
+          <div class="step" data-n="3"><h3>Handoff Relay 转存 Outbox</h3><p>后台线程按 Redis 租约工作，空闲默认 20ms 轮询。批量幂等写 MySQL Outbox；确认写入提交后删除 Handoff。崩溃在删除前会再次转存同一事件。</p></div>
+          <div class="step" data-n="4"><h3>Outbox Relay 投递 Kafka</h3><p>默认 100ms 调度，按到期时间和租约领取 PENDING/SENT。Publisher 发送成功但未标记 SENT 时允许重发；SENT 默认 60 秒重查。</p></div>
+          <div class="step" data-n="5"><h3>Consumer 在数据库事务里落单</h3><p>批次按 orderId 去重，<code>INSERT IGNORE</code> 后核对被忽略订单，按实际新增数扣 MySQL 库存，Outbox 标记 COMPLETED。</p></div>
+          <div class="step" data-n="6"><h3>事务返回后手动 Kafka ACK <span class="tag">SECOND COMMIT POINT</span></h3><p>事务失败就抛异常、不 ACK；事务提交后即使 ACK 前崩溃，重放也会按 orderId 幂等跳过。</p></div>
+          <div class="step" data-n="7"><h3>刷新终态，用户查询 SUCCESS</h3><p>Redis 受理凭证更新为 SUCCESS 并保留默认 7 天；用户状态查询优先看 MySQL 订单，MySQL 不可用时再看凭证。</p></div>
+        </div>
+      </section>
+
+      <section id="reasons" class="section">
+        <div class="section-top"><span class="section-num">07 / WHY AUDIT</span><span class="section-line"></span></div><h2>有 Kafka 重试，为什么还需要定时对账？</h2>
+        <div class="card why"><h3>重试只能覆盖“仍在队列里的任务”；对账负责发现“责任链断开的任务”</h3><ol><li>Redis Lua 已成功，但 MySQL 故障，Handoff 一直没转存；用户已拿到 PROCESSING。</li><li>Outbox 已提交，但 Publisher 崩溃、SENT 状态迟迟没有订单；需要按原 ID 重查。</li><li>订单事务已提交、Kafka ACK 前崩溃；再次消费要确认没有重复扣库。</li><li>更严重的是 Handoff、Outbox 或订单某段缺失，仍有受理凭证；单靠 Kafka 消费者看不到这笔任务。</li><li>Redis 与 MySQL 库存出现差值，需区分在途预留与无法解释的漂移，保留证据给人工处理。</li></ol></div>
+        <div class="grid2" style="margin-top:15px"><div class="card pad"><span class="kicker">输送机制</span><h3>Relay / Kafka 重试</h3><p>任务已知且仍在可领取队列里，按租约和退避反复推进。它解决暂时性传输或处理失败。</p></div><div class="card pad"><span class="kicker">核查机制</span><h3>定时逐单巡检</h3><p>从独立受理凭证反查订单与 Outbox，发现链路断点并按原 ID 修复或报警。它不靠总库存差额猜测单笔订单。</p></div></div>
+        <div class="callout orange"><strong>时间阈值不是失败判定</strong><p>没有逐单 Consumer 心跳或栅栏，仅凭“过了 60 秒”“Kafka lag 高”“已进 DLT”无法证明消费者永久失败。定时任务只触发重查、可逆重投、补写 Outbox 和人工升级。</p></div>
+      </section>
+
+      <section id="audit" class="section">
+        <div class="section-top"><span class="section-num">08 / PER-ORDER AUDIT</span><span class="section-line"></span></div><h2>逐单巡检：凭什么查，按什么顺序补？</h2>
+        <p class="lead">受理 Lua 把 orderId 放入巡检 ZSet，score 为受理时间 + 60 秒。默认每 60 秒扫描最多 200 笔；Lua 原子领取一笔，并把 score 推后默认 5 分钟，作为崩溃后可再次领取的租约。</p>
+        <div class="decision">
+          <div class="card decision-card"><span class="n">01 / ORDER EXISTS</span><h3>MySQL 订单已存在</h3><p>核对 userId、voucherId；Outbox 未完成则补为 COMPLETED；凭证同步 SUCCESS 或 CANCELLED。<b>不再扣库存。</b></p></div>
+          <div class="card decision-card"><span class="n">02 / NO ORDER · NO OUTBOX</span><h3>受理凭证仍可信</h3><p>用同一 orderId、userId、voucherId 幂等补写 MySQL Outbox。后续 Relay 与 Consumer 继续完成订单；<b>不重新预扣 Redis。</b></p></div>
+          <div class="card decision-card warn"><span class="n">03 / NO ORDER · PENDING OR SENT</span><h3>已有在途 Outbox</h3><p>记录等待中的状态，交给 Outbox 租约和退避机制继续投递或重查。下一个巡检租约到期再核实；<b>不立即认定失败。</b></p></div>
+          <div class="card decision-card danger"><span class="n">04 / CONTRADICTION OR PARKED</span><h3>进入人工关注</h3><p><code>MANUAL_REVIEW</code>、<code>COMPLETED</code> 却无订单、凭证缺失或归属冲突：记录错误并核查；<b>绝不凭猜测释放资格。</b></p></div>
+        </div>
+        <div class="callout teal"><strong>人工停车的动作边界</strong><p>默认 Kafka 消费重试 3 次（间隔 1 秒）后发送 DLT；DLT 消费者把 Outbox 置为 MANUAL_REVIEW，默认责任队列 <code>seckill-ops</code>、1 小时截止，每 5 分钟检查超时。操作员可按原 ID 重试、确认已完成、申请终态失败审核。申请只留痕，不执行 FAILED / Redis 库存释放。</p></div>
+      </section>
+
+      <section id="aggregate" class="section">
+        <div class="section-top"><span class="section-num">09 / AGGREGATE AUDIT</span><span class="section-line"></span></div><h2>库存对账：先判在途，再看差额</h2>
+        <p class="lead">库存汇总任务默认每天 02:00、08:00、14:00、20:00 运行。它用于发现无法由在途任务解释的漂移；当前实现只有读和日志，没有重写 Redis 的定时动作。</p>
+        <div class="grid2"><div class="card pad"><span class="kicker">Gate / 先暂缓</span><h3>任何仍在途的证据</h3><p>先查该券未落单 Outbox、Redis Handoff，以及全局未解决受理凭证 ZSet 的数量。任一非零，就不做库存数值比较，避免把异步滞后误报为库存错误。</p></div><div class="card pad"><span class="kicker">Compare / 稳定后核对</span><h3>库存和已购集合</h3><p>没有在途证据时，读 MySQL 剩余库存与 Redis 剩余库存；再比较 MySQL 有效订单 userId 集合与 Redis 已购 Set。差异仅写错误日志，交人工调查。</p></div></div>
+        <div class="mathbar" aria-label="库存差异示例"><span>Redis 剩余<strong>20</strong></span><span class="op">↔</span><span>MySQL 剩余<strong>25</strong></span><span class="op">＋</span><span>待落单预留<strong>5</strong></span></div>
+        <div class="callout navy"><strong>示例判读</strong><p>若 5 笔预扣仍在 Handoff / 未落单 Outbox 中，Redis 20、MySQL 25 是异步处理窗口，不触发回补。若没有任何在途证据，差 5 才报警并保留现场；依旧不会自动把 Redis 改成 25。</p></div>
+        <div class="callout orange"><strong>当前实现的精度限制</strong><p>未解决受理凭证 ZSet 是全局 Key：一个活动还有待处理任务，其他活动的汇总比较也会暂缓。MANUAL_REVIEW 长期未处理也会使该券持续暂缓；逐单巡检及人工超时日志仍运行。这里的“没有在途”是代码可见证据，不等于数学上证明不存在消费者正在执行。</p></div>
+      </section>
+
+      <section id="failures" class="section">
+        <div class="section-top"><span class="section-num">10 / FAILURE LAB</span><span class="section-line"></span></div><h2>故障发生在哪一秒，系统怎么走？</h2>
+        <p class="lead">点选故障场景。每一种情况都区分：用户看到什么、系统如何恢复、Redis 预留是否返还。</p>
+        <div class="scenario-tabs" role="tablist" aria-label="故障场景"><button type="button" class="active" data-case="mysql" role="tab" aria-selected="true">MySQL 暂不可用</button><button type="button" data-case="handoff" role="tab" aria-selected="false">Outbox 提交后崩溃</button><button type="button" data-case="publish" role="tab" aria-selected="false">Kafka 发送后崩溃</button><button type="button" data-case="ack" role="tab" aria-selected="false">事务提交后 ACK 前崩溃</button><button type="button" data-case="dlt" role="tab" aria-selected="false">消费一直失败</button><button type="button" data-case="drift" role="tab" aria-selected="false">库存数值不一致</button></div>
+        <div class="scenario-panel" id="scenario-panel" role="tabpanel" aria-live="polite"><h3 id="scenario-title">Lua 已成功，MySQL 暂不可用</h3><p id="scenario-desc">Redis 库存已扣，Handoff 与受理凭证仍在。</p><div class="scenario-grid"><div class="scenario-cell"><b>用户状态</b><span id="scenario-user">PROCESSING</span></div><div class="scenario-cell"><b>恢复路径</b><span id="scenario-recovery">Handoff Relay 重试</span></div><div class="scenario-cell"><b>Redis 库存</b><span id="scenario-stock">保留预扣，不回补</span></div></div><ol class="scenario-steps" id="scenario-steps"><li>Handoff 保留原 orderId，后台退避重试写 Outbox。</li><li>MySQL 恢复后写入并继续 Kafka 消费。</li><li>超过巡检时间可用受理凭证再次核查。</li></ol></div>
+      </section>
+
+      <section id="consistency" class="section">
+        <div class="section-top"><span class="section-num">11 / CONSISTENCY</span><span class="section-line"></span></div><h2>最终一致性靠哪些可验证的不变量？</h2>
+        <div class="grid2">
+          <div class="card pad"><span class="kicker">Invariant 01</span><h3>同一资格只受理一次</h3><p>Redis Lua 的库存检查与 <code>SISMEMBER / SADD</code> 同处原子边界；重复点击不会创建第二笔成功预留。</p></div>
+          <div class="card pad"><span class="kicker">Invariant 02</span><h3>同一订单只落库一次</h3><p>orderId 贯穿 Handoff、Outbox、Kafka 和订单主键。重复 Outbox 有唯一键，重复 Kafka 消息按订单主键核对历史记录。</p></div>
+          <div class="card pad"><span class="kicker">Invariant 03</span><h3>MySQL 只扣新订单数</h3><p>订单插入与 MySQL 扣库在事务内；库存扣减量是实际新插入数。失败抛出回滚，消费者不 ACK。</p></div>
+          <div class="card pad"><span class="kicker">Invariant 04</span><h3>任何断点可重新推进</h3><p>Handoff 待交接、Outbox 租约、Kafka 重投、受理凭证逐单巡检形成多层恢复线索。ACK 发生在事务提交之后。</p></div>
+        </div>
+        <div class="callout teal"><strong>一致性的含义</strong><p>在受理凭证和交接记录可用、依赖服务恢复、异常任务得到人工处理的前提下，<code>PROCESSING</code> 任务持续被推进到订单 <code>SUCCESS</code>。Redis 与 MySQL 库存在处理期间允许不同；最终稳定后才适合做汇总核对。这里是“至少一次输送 + 幂等落库 + 补漏巡检”，不是跨 Redis、Kafka、MySQL 的端到端恰好一次事务。</p></div>
+      </section>
+
+      <section id="boundaries" class="section">
+        <div class="section-top"><span class="section-num">12 / BOUNDARIES</span><span class="section-line"></span></div><h2>哪些事当前没有自动化？</h2>
+        <div class="table-wrap"><table><thead><tr><th>边界</th><th>当前行为</th><th>为什么重要</th></tr></thead><tbody>
+          <tr><td>终态失败与库存释放</td><td><span class="pill red">未启用</span> 只有人工“失败审核申请”留痕。</td><td>必须先明确不可履约规则、拦住迟到消费者的数据库栅栏、按 orderId 幂等释放及通知规则；死信或超时本身不够。</td></tr>
+          <tr><td>Redis-only 受理耐久性</td><td><span class="pill orange">待决策 D1</span> 默认在 MySQL Outbox 提交前就返回 PROCESSING。</td><td>若 Redis 中受理凭证和 Handoff 同时丢失，仅凭 MySQL 无法还原已答复用户的资格；定时对账也无法凭空找回。</td></tr>
+          <tr><td>消费者正在执行的证明</td><td>当前无逐单消费心跳或栅栏。</td><td>不能凭 SENT 未落单和时间超限断言消费者已经永久失败，因此只重查、重投或交人工。</td></tr>
+          <tr><td>自动发券旁支</td><td>自动发券 Lua 写入 Handoff，但未写用户秒杀路径的 accepted Hash / audit ZSet。</td><td>Handoff Relay 仍能交接；本文逐单受理凭证巡检专指普通用户秒杀路径，不能声称覆盖自动发券的每一笔。</td></tr>
+          <tr><td>灾难重建 Redis</td><td>旧重建服务仅保留人工调用，没有定时自动运行。</td><td>必须先人工核实受理流水完整，否则从 MySQL 反推 Redis 会覆盖已告知用户的预留。</td></tr>
+        </tbody></table></div>
+        <div class="callout red"><strong>上线前必须验证</strong><p>已有有效订单重复数据会阻止 V11 唯一索引迁移；需先清理。完整集成与故障注入还需 Redis、MySQL、Kafka 环境。本文描述的是仓库当前逻辑，不代表这些外部依赖在此桌面文件中运行过。</p></div>
+      </section>
+
+      <section id="sources" class="section">
+        <div class="section-top"><span class="section-num">13 / SOURCE MAP</span><span class="section-line"></span></div><h2>回到代码：关键实现定位</h2>
+        <p class="lead">下列路径均相对于 <code>hm-dianping</code> 项目根目录。HTML 为离线单文件，不依赖项目资源即可阅读。</p>
+        <div class="source-list">
+          <div><b>受理 Lua 与用户状态</b><code>src/main/resources/seckill.lua</code><br><code>src/main/java/com/hmdp/service/impl/VoucherOrderServiceImpl.java</code></div>
+          <div><b>Handoff 与 Outbox Relay</b><code>src/main/java/com/hmdp/kafka/outbox/SeckillOrderHandoffRelay.java</code><br><code>src/main/java/com/hmdp/kafka/outbox/SeckillOrderOutboxRelay.java</code></div>
+          <div><b>消费事务与幂等</b><code>src/main/java/com/hmdp/service/SeckillOrderConsumerService.java</code><br><code>src/main/java/com/hmdp/service/impl/VoucherOrderPersistenceServiceImpl.java</code></div>
+          <div><b>逐单巡检与只读对账</b><code>src/main/java/com/hmdp/service/SeckillAcceptedOrderAuditService.java</code><br><code>src/main/java/com/hmdp/service/SeckillInventoryAuditService.java</code></div>
+          <div><b>死信与人工处理</b><code>src/main/java/com/hmdp/kafka/SeckillOrderKafkaConsumer.java</code><br><code>src/main/java/com/hmdp/service/SeckillAcceptedOrderRecoveryService.java</code></div>
+          <div><b>表结构与配置</b><code>src/main/resources/db/hmdp.sql</code><br><code>src/main/resources/db/migration/V5…V12</code><br><code>src/main/resources/application.yaml</code></div>
+        </div>
+      </section>
+      <footer class="footer"><span>秒杀系统全链路 · 基于 HM-DIANPING 当前实现 · 2026-11-14</span><span>打印时自动展开正文布局 · 不加载外部资源</span></footer>
+    </div>
+  </main>
+</div>
+<a class="top-link" href="#top" aria-label="返回顶部">↑ 返回顶部</a>
+<script>
+  const cases = {
+    mysql:{title:'Lua 已成功，MySQL 暂不可用',desc:'Redis 库存已扣，Handoff 与受理凭证仍在。',user:'PROCESSING',recovery:'Handoff Relay 重试',stock:'保留预扣，不回补',steps:['Handoff 保留原 orderId，后台退避重试写 Outbox。','MySQL 恢复后写入并继续 Kafka 消费。','超过巡检时间可用受理凭证再次核查。']},
+    handoff:{title:'Outbox 已提交，删除 Handoff 前进程崩溃',desc:'MySQL 已有可靠交接记录，Redis 里还留着同一笔 Handoff。',user:'PROCESSING',recovery:'再次幂等写同一 Outbox',stock:'保留预扣，不重复扣',steps:['重启后 Handoff Relay 再次读取同一个 member。','Outbox 的 order_id / event_id 唯一键避免第二条事件；写入方校验归属字段。','确认提交后清理 Handoff，后续 Publisher 正常投递。']},
+    publish:{title:'Kafka 已持久化消息，Publisher 标记 SENT 前崩溃',desc:'发送结果对进程不确定，但 Outbox 仍为 PENDING 或等待重查。',user:'PROCESSING',recovery:'Outbox 重投，同 orderId 幂等',stock:'保留预扣，不重复扣',steps:['Relay 租约到期后重新领取事件并允许再发一次。','消费者按 orderId 主键处理重复消息。','只有实际新插入订单才扣 MySQL 库存。']},
+    ack:{title:'订单事务已提交，Kafka ACK 前崩溃',desc:'数据库已经有订单，但 Kafka 仍可能重放这条消息。',user:'SUCCESS（可由 MySQL 查得）',recovery:'重复消费查历史订单并 ACK',stock:'Redis 不变；MySQL 不再扣',steps:['重复消息再次进入 Consumer。','INSERT IGNORE 未新增订单；按 orderId 核对历史订单 userId / voucherId，即使原订单后来取消也能识别。','事务正常返回后手动 ACK。']},
+    dlt:{title:'Kafka 消费多次失败，进入 DLT',desc:'失败尚不能证明用户资格应被释放。',user:'MANUAL_REVIEW（未落单时）',recovery:'停车、告警、人工按原 ID 重试',stock:'保留预扣，不回补',steps:['默认重试 3 次后投递死信。','DLT 消费者把 Outbox 标为 MANUAL_REVIEW，写入责任队列与处理截止时间。','人工核对订单和故障原因后选择重试或确认完成；失败审核申请不会自动释放库存。']},
+    drift:{title:'Redis 剩余 20，MySQL 剩余 25',desc:'数值差异先看是否有 5 笔尚未落单的受理。',user:'在途用户仍为 PROCESSING',recovery:'逐单定位；稳定后只读报警',stock:'不按差额自动加 5',steps:['汇总审计先查未落单 Outbox、Handoff 和未解决受理凭证。','有在途证据就暂缓汇总比较，逐单巡检继续推进。','完全稳定后仍差 5 才报警，保留现场交人工调查。']}
+  };
+  const panel = document.getElementById('scenario-panel');
+  document.querySelectorAll('[data-case]').forEach(button => button.addEventListener('click', () => {
+    document.querySelectorAll('[data-case]').forEach(item => { item.classList.toggle('active', item === button); item.setAttribute('aria-selected', item === button ? 'true' : 'false'); });
+    const item = cases[button.dataset.case];
+    document.getElementById('scenario-title').textContent = item.title;
+    document.getElementById('scenario-desc').textContent = item.desc;
+    document.getElementById('scenario-user').textContent = item.user;
+    document.getElementById('scenario-recovery').textContent = item.recovery;
+    document.getElementById('scenario-stock').textContent = item.stock;
+    const list = document.getElementById('scenario-steps'); list.replaceChildren();
+    item.steps.forEach(step => { const li = document.createElement('li'); li.textContent = step; list.append(li); });
+    panel.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }));
+  if ('IntersectionObserver' in window) {
+    const links = [...document.querySelectorAll('.navlink')];
+    const observer = new IntersectionObserver(entries => {
+      entries.filter(entry => entry.isIntersecting).forEach(entry => links.forEach(link => link.classList.toggle('active', link.getAttribute('href') === '#' + entry.target.id)));
+    }, {rootMargin:'-12% 0px -72% 0px',threshold:0});
+    document.querySelectorAll('main section[id]').forEach(section => observer.observe(section));
+  }
+</script>
+</body>
+</html>

@@ -5,6 +5,7 @@ public enum SeckillOrderStatus {
     SUCCESS,
     FAILED,
     CANCELLED,
+    UNKNOWN,
     DUPLICATE_EXISTING,
     MANUAL_REVIEW
 }

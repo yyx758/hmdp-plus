@@ -137,17 +137,25 @@ public interface SeckillOrderOutboxMapper extends BaseMapper<SeckillOrderOutboxE
     @Update("UPDATE tb_seckill_order_outbox SET status = 'COMPLETED', "
             + "completed_time = COALESCE(completed_time, NOW()), "
             + "updated_time = NOW(), last_error = NULL, relay_owner = NULL, "
-            + "relay_lease_until = NULL WHERE order_id = #{orderId} "
-            + "AND status IN ('PENDING', 'SENT')")
+            + "relay_lease_until = NULL, review_owner = NULL, review_deadline = NULL "
+            + "WHERE order_id = #{orderId} "
+            + "AND status IN ('PENDING', 'SENT', 'MANUAL_REVIEW')")
     int markCompleted(@Param("orderId") Long orderId);
+
+    @Update("UPDATE tb_seckill_order_outbox SET status = 'COMPLETED', "
+            + "completed_time = COALESCE(completed_time, NOW()), updated_time = NOW(), "
+            + "last_error = NULL, review_owner = NULL, review_deadline = NULL "
+            + "WHERE order_id = #{orderId} AND status = 'MANUAL_REVIEW'")
+    int markCompletedFromManualReview(@Param("orderId") Long orderId);
 
     @Update({"<script>",
             "UPDATE tb_seckill_order_outbox SET status = 'COMPLETED', ",
             "completed_time = COALESCE(completed_time, NOW()), ",
-            "updated_time = NOW(), last_error = NULL, relay_owner = NULL, relay_lease_until = NULL ",
+            "updated_time = NOW(), last_error = NULL, relay_owner = NULL, relay_lease_until = NULL, ",
+            "review_owner = NULL, review_deadline = NULL ",
             "WHERE order_id IN ",
             "<foreach collection='orderIds' item='orderId' open='(' separator=',' close=')'>",
-            "#{orderId}</foreach> AND status IN ('PENDING', 'SENT')",
+            "#{orderId}</foreach> AND status IN ('PENDING', 'SENT', 'MANUAL_REVIEW')",
             "</script>"})
     int markCompletedBatch(@Param("orderIds") List<Long> orderIds);
 
@@ -161,10 +169,11 @@ public interface SeckillOrderOutboxMapper extends BaseMapper<SeckillOrderOutboxE
     @Update({"<script>",
             "UPDATE tb_seckill_order_outbox SET status = 'COMPLETED', ",
             "completed_time = COALESCE(completed_time, NOW()), ",
-            "updated_time = NOW(), last_error = NULL, relay_owner = NULL, relay_lease_until = NULL ",
+            "updated_time = NOW(), last_error = NULL, relay_owner = NULL, relay_lease_until = NULL, ",
+            "review_owner = NULL, review_deadline = NULL ",
             "WHERE id IN ",
             "<foreach collection='ids' item='id' open='(' separator=',' close=')'>",
-            "#{id}</foreach> AND status IN ('PENDING', 'SENT')",
+            "#{id}</foreach> AND status IN ('PENDING', 'SENT', 'MANUAL_REVIEW')",
             "</script>"})
     int markCompletedBatchByIds(@Param("ids") List<Long> ids);
 
@@ -185,7 +194,9 @@ public interface SeckillOrderOutboxMapper extends BaseMapper<SeckillOrderOutboxE
     int countCompletedBatch(@Param("orderIds") List<Long> orderIds);
 
     @Update("UPDATE tb_seckill_order_outbox SET status = 'MANUAL_REVIEW', updated_time = NOW(), "
-            + "last_error = #{reason}, relay_owner = NULL, relay_lease_until = NULL "
+            + "last_error = #{reason}, relay_owner = NULL, relay_lease_until = NULL, "
+            + "review_owner = COALESCE(review_owner, 'seckill-ops'), "
+            + "review_deadline = COALESCE(review_deadline, DATE_ADD(NOW(), INTERVAL 1 HOUR)) "
             + "WHERE order_id = #{orderId} AND status <> 'COMPLETED'")
     int markManualReview(@Param("orderId") Long orderId, @Param("reason") String reason);
 
@@ -196,6 +207,15 @@ public interface SeckillOrderOutboxMapper extends BaseMapper<SeckillOrderOutboxE
     int requeueAccepted(@Param("orderId") Long orderId,
                         @Param("nextRetryTime") LocalDateTime nextRetryTime,
                         @Param("reason") String reason);
+
+    @Update("UPDATE tb_seckill_order_outbox SET status = 'PENDING', "
+            + "retry_count = retry_count + 1, next_retry_time = #{nextRetryTime}, "
+            + "updated_time = NOW(), last_error = #{reason}, relay_owner = NULL, "
+            + "relay_lease_until = NULL, review_owner = NULL, review_deadline = NULL "
+            + "WHERE order_id = #{orderId} AND status = 'MANUAL_REVIEW'")
+    int requeueManualReview(@Param("orderId") Long orderId,
+                            @Param("nextRetryTime") LocalDateTime nextRetryTime,
+                            @Param("reason") String reason);
 
     @Select("SELECT COUNT(1) FROM tb_seckill_order_outbox WHERE status IN ('PENDING', 'SENT')")
     long countBacklog();
@@ -214,6 +234,7 @@ public interface SeckillOrderOutboxMapper extends BaseMapper<SeckillOrderOutboxE
     @Select("SELECT id, event_id AS eventId, order_id AS orderId, voucher_id AS voucherId, "
             + "user_id AS userId, auto_issued AS autoIssued, status, retry_count AS retryCount, "
             + "next_retry_time AS nextRetryTime, last_error AS lastError, "
+            + "review_owner AS reviewOwner, review_deadline AS reviewDeadline, "
             + "created_time AS createdTime, updated_time AS updatedTime, sent_time AS sentTime, "
             + "completed_time AS completedTime FROM tb_seckill_order_outbox o "
             + "WHERE o.voucher_id = #{voucherId} "
@@ -225,8 +246,16 @@ public interface SeckillOrderOutboxMapper extends BaseMapper<SeckillOrderOutboxE
             + "user_id AS userId, auto_issued AS autoIssued, status, retry_count AS retryCount, "
             + "next_retry_time AS nextRetryTime, last_error AS lastError, "
             + "relay_owner AS relayOwner, relay_lease_until AS relayLeaseUntil, "
+            + "review_owner AS reviewOwner, review_deadline AS reviewDeadline, "
             + "created_time AS createdTime, updated_time AS updatedTime, sent_time AS sentTime, "
             + "completed_time AS completedTime FROM tb_seckill_order_outbox "
             + "WHERE status = 'MANUAL_REVIEW' ORDER BY updated_time ASC LIMIT #{limit}")
     List<SeckillOrderOutboxEvent> findManualReview(@Param("limit") int limit);
+
+    @Select("SELECT id, order_id AS orderId, voucher_id AS voucherId, "
+            + "user_id AS userId, status, review_owner AS reviewOwner, "
+            + "review_deadline AS reviewDeadline FROM tb_seckill_order_outbox "
+            + "WHERE status = 'MANUAL_REVIEW' AND review_deadline < NOW() "
+            + "ORDER BY review_deadline ASC LIMIT #{limit}")
+    List<SeckillOrderOutboxEvent> findOverdueManualReview(@Param("limit") int limit);
 }

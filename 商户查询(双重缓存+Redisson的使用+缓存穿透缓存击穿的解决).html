@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>商户查询：双重缓存、Redisson 与缓存风险治理</title>
+  <style>
+    :root { --ink:#16233a; --muted:#61708a; --paper:#fff; --bg:#f5f7fb; --brand:#2359d1; --brand-pale:#e9f0ff; --green:#0c7b5e; --orange:#ae6010; --red:#af3c43; --line:#dce3ef; --code:#172033; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; color:var(--ink); background:var(--bg); font:16px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif; }
+    header { color:white; padding:64px max(24px,calc((100vw - 1080px)/2)); background:radial-gradient(circle at 78% 12%,#477cf0 0,transparent 30%),linear-gradient(135deg,#132751,#2359d1); }
+    header p { max-width:820px; color:#dce8ff; margin:14px 0 0; font-size:18px; }
+    h1 { line-height:1.25; font-size:clamp(30px,5vw,48px); margin:0; letter-spacing:-1px; }
+    .tag { display:inline-block; border:1px solid #8eb0ff; color:#dbe7ff; padding:2px 10px; border-radius:99px; font-size:13px; margin-bottom:14px; }
+    .wrap { width:min(1080px,calc(100% - 32px)); margin:0 auto 64px; }
+    .toc { background:#fff; margin:-24px 0 28px; border:1px solid var(--line); box-shadow:0 10px 28px #18285012; border-radius:14px; padding:18px 22px; position:relative; }
+    .toc a { display:inline-block; color:var(--brand); text-decoration:none; margin:4px 17px 4px 0; font-size:14px; }
+    section { background:var(--paper); border:1px solid var(--line); padding:30px; margin:22px 0; border-radius:14px; }
+    h2 { margin:0 0 16px; font-size:25px; line-height:1.35; }
+    h3 { margin:25px 0 10px; font-size:19px; }
+    h4 { margin:18px 0 7px; font-size:16px; }
+    p { margin:9px 0; }
+    .lead { font-size:18px; color:#263754; }
+    .flow { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:17px; background:#f5f8ff; border:1px solid #d7e3ff; border-radius:10px; font-weight:700; color:#244886; }
+    .node { background:white; padding:6px 11px; border:1px solid #bdd0f8; border-radius:7px; }
+    .arrow { color:#6f91d9; }
+    .callout { border-left:4px solid var(--brand); background:var(--brand-pale); border-radius:0 8px 8px 0; padding:13px 16px; margin:15px 0; }
+    .warn { border-left-color:#e08b2c; background:#fff7e9; }
+    .good { border-left-color:#25a57d; background:#edfbf6; }
+    .danger { border-left-color:#d74e57; background:#fff0f1; }
+    code { font-family:Consolas,"Cascadia Code",monospace; font-size:.9em; background:#eef2f8; padding:1px 4px; border-radius:4px; }
+    pre { overflow:auto; padding:18px 20px; border-radius:10px; background:var(--code); color:#dae6ff; border:1px solid #273650; line-height:1.55; font:13px/1.55 Consolas,"Cascadia Code",monospace; }
+    .k { color:#9cc3ff; } .s { color:#b6e6a4; } .c { color:#8997b3; } .n { color:#ffcb8c; }
+    table { width:100%; border-collapse:collapse; margin:13px 0; font-size:14px; }
+    th,td { text-align:left; vertical-align:top; padding:11px; border:1px solid var(--line); }
+    th { background:#f0f4fb; }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+    .card { border:1px solid var(--line); background:#fbfcff; padding:16px; border-radius:10px; }
+    .card h3 { margin-top:0; }
+    ol,ul { padding-left:24px; }
+    li { margin:5px 0; }
+    .q { font-weight:700; color:#1749a9; }
+    footer { color:var(--muted); font-size:13px; padding:2px 5px; }
+    @media (max-width:720px) { section{padding:20px} .grid{grid-template-columns:1fr} header{padding-top:42px;padding-bottom:55px} }
+    @media print { body{background:white;font-size:12px} header{padding:25px}.wrap{width:100%;margin:0} section{break-inside:avoid;border-color:#ddd;margin:10px 0;padding:18px}.toc{margin:10px 0;box-shadow:none} pre{white-space:pre-wrap} }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="tag">hm-dianping · 商户详情查询链路</span>
+    <h1>商户查询：双重缓存、Redisson<br>与缓存穿透/击穿治理</h1>
+    <p>目标不是背出 Caffeine、Bloom Filter、Redis 和 Redisson，而是能解释：每一层删掉之后会出现什么问题；为什么它被放在这里；真实代码如何让它们协作。</p>
+  </header>
+  <main class="wrap">
+    <nav class="toc">
+      <strong>阅读路径：</strong>
+      <a href="#goal">1. 先明确目标</a><a href="#compare">2. 双重缓存效果</a><a href="#caffeine">3. 为什么 Caffeine</a><a href="#code">4. 总入口代码</a><a href="#bloom">5. Bloom</a><a href="#redis">6. Redis</a><a href="#redisson">7. Redisson</a><a href="#invalidation">8. L1 失效全链路</a><a href="#consistency">9. 一致性</a><a href="#interview">10. 面试表达</a>
+    </nav>
+
+    <section id="goal">
+      <h2>1. 先从问题出发：一条读请求真正怕什么？</h2>
+      <p class="lead">接口是 <code>GET /shop/{id}</code>。热门商户会被反复读取，且请求可能来自多个应用实例。若每次都查 MySQL，数据库既承担热点读，又会在缓存失效或恶意 ID 下被突发流量击穿。</p>
+      <div class="flow"><span class="node">请求</span><span class="arrow">→</span><span class="node">Caffeine L1</span><span class="arrow">→</span><span class="node">Bloom Filter</span><span class="arrow">→</span><span class="node">Redis L2</span><span class="arrow">→</span><span class="node">Redisson 重建锁</span><span class="arrow">→</span><span class="node">MySQL</span></div>
+      <div class="grid">
+        <div class="card"><h3>业务目标</h3><p>让绝大多数热门查询在应用内完成；缓存未命中时也只让极少数请求回源数据库。</p></div>
+        <div class="card"><h3>正确性目标</h3><p>不存在的商户不反复穿透；热点 Key 失效时不并发打库；更新后各实例的 L1 不长期陈旧。</p></div>
+      </div>
+      <div class="callout"><strong>重要边界：</strong>本项目的缓存是读性能优化，不是最终数据源。缓存暂时失效时应允许回源；不能因为防护组件异常就把真实存在的商户误判为不存在。</div>
+    </section>
+
+    <section id="compare">
+      <h2>2. 为什么要双重缓存：使用前后到底改变了什么？</h2>
+      <table>
+        <thead><tr><th>方案</th><th>热门 Key 的请求路径</th><th>主要代价</th><th>适用结论</th></tr></thead>
+        <tbody>
+          <tr><td>无缓存</td><td>应用 → MySQL</td><td>每次网络/SQL/连接池开销都落在数据库；热点会直接放大 DB 压力。</td><td>不适合读多写少的商户详情。</td></tr>
+          <tr><td>仅 Redis</td><td>应用 → Redis</td><td>数据库被保护，但所有命中都要一次网络往返；超热点集中到 Redis。</td><td>共享缓存层必要，但仍有进一步降压空间。</td></tr>
+          <tr><td><strong>Caffeine + Redis</strong></td><td>应用 → 本 JVM；L1 未命中才到 Redis</td><td>需要处理多实例 L1 的失效通知；允许短暂最终一致。</td><td>本项目采用：读多、热点明显、可容忍短暂缓存陈旧。</td></tr>
+        </tbody>
+      </table>
+      <h3>2.1 L1 Caffeine 做什么</h3>
+      <p>它是<strong>进程内缓存</strong>：无网络、无序列化，命中时最快。代价是每个 JVM 都有自己的副本，因此它不能取代 Redis 的共享缓存角色。</p>
+      <pre><span class="c">// ShopLocalCache.java：L1 的大小和生命周期</span>
+this.cache = Caffeine.newBuilder()
+        .maximumSize(maximumSize)                       <span class="c">// 默认 10,000</span>
+        .expireAfterWrite(expireAfterWriteSeconds, TimeUnit.SECONDS) <span class="c">// 默认 60 秒</span>
+        .build();
+
+public Shop get(Long shopId) {
+    return !enabled || shopId == null ? null : cache.getIfPresent(shopId);
+}</pre>
+      <h3>2.2 L2 Redis 做什么</h3>
+      <p>Redis 是<strong>跨 JVM 共享</strong>的缓存。某实例回源并写入 Redis 后，其他实例的下一次 L1 未命中可以直接复用；它也是空值标记与分布式锁的共同基础。</p>
+      <div class="callout good"><strong>效果不是简单叠加两份缓存。</strong>L1 把“同一实例的热点重复读”截在本机；L2 把“多个实例之间的缓存数据”共享起来。两层分别优化 CPU/网络路径与跨实例复用率。</div>
+      <div class="callout warn"><strong>关于效果数据：</strong>代码配置能确认 L1 默认 60 秒、最大 10,000 条，Redis 默认 TTL 30 分钟；但仓库没有提供该接口的压测结果。因此这里不虚构“QPS 提升/延迟降低”的数值。要量化效果，应对比 L1 命中率、Redis QPS、MySQL 查询次数和 P95/P99 延迟。</div>
+    </section>
+
+    <section id="caffeine">
+      <h2>3. 为什么已有 Redis，还要加 Caffeine？</h2>
+      <p class="lead">因为 Redis 虽然快，但对应用来说仍是<strong>远程共享服务</strong>；Caffeine 是 JVM 堆内的<strong>本地缓存</strong>。两者不是重复建设，而是在不同位置截断不同类型的成本。</p>
+      <h3>3.1 一次 Redis 命中，仍然不是“零成本”</h3>
+      <div class="flow"><span class="node">业务线程</span><span class="arrow">→</span><span class="node">序列化请求</span><span class="arrow">→</span><span class="node">网络往返</span><span class="arrow">→</span><span class="node">Redis 排队/执行</span><span class="arrow">→</span><span class="node">网络返回</span><span class="arrow">→</span><span class="node">JSON 反序列化</span></div>
+      <p>即使 Redis 完全健康，以上步骤仍会消耗网络连接、Redis 命令处理能力以及 JSON 编解码 CPU。Caffeine 命中则是进程内的 <code>cache.getIfPresent()</code>：没有网络往返，也没有 Redis JSON 的序列化/反序列化路径。</p>
+      <table>
+        <thead><tr><th>维度</th><th>只用 Redis</th><th>加入 Caffeine 后</th></tr></thead>
+        <tbody>
+          <tr><td>热点请求路径</td><td>每次都跨网络访问 Redis。</td><td>同一实例已预热的热点直接从 JVM 内存返回。</td></tr>
+          <tr><td>Redis 压力</td><td>所有命中请求都是 Redis 命令。</td><td>L1 命中的请求不会到 Redis，给秒杀、分布式锁等 Redis 关键路径腾出容量。</td></tr>
+          <tr><td>尾延迟</td><td>会受网络抖动、连接池等待、Redis 瞬时排队影响。</td><td>热点读避开这些外部波动；L1 miss 时仍由 Redis 兜底。</td></tr>
+          <tr><td>数据一致性</td><td>天然共享同一份 L2 数据。</td><td>每个 JVM 有副本，必须做失效通知；本项目接受短暂最终一致。</td></tr>
+        </tbody>
+      </table>
+      <h3>3.2 关键前提：热点访问具有局部性</h3>
+      <p>Caffeine 有价值的前提不是“请求多”，而是“少数商户被反复请求”。例如某个热门店铺在一台应用实例上连续被访问：第一次 L1 miss 后由 Redis/DB 回填；在默认 60 秒 L1 生命周期内，后续同实例请求均不再访问 Redis。若请求永远是不同的随机 ID，L1 命中率低，收益也会很小。</p>
+      <div class="callout"><strong>如何正确描述收益：</strong>若一个热点商户在某实例的 60 秒窗口内出现 <em>r</em> 次请求，并且首次回填成功，那么理想情况下可省去约 <em>r − 1</em> 次 Redis 读取。真实收益还受 Caffeine 淘汰、多个应用实例的流量分布、主动失效事件影响，因此必须通过命中率而不是主观估计来验证。</div>
+      <h3>3.3 本项目的 Caffeine 配置及其含义</h3>
+      <pre><span class="c">// ShopLocalCache.java：实际项目代码</span>
+this.cache = Caffeine.newBuilder()
+        .maximumSize(maximumSize)                         <span class="c">// 默认 10,000：给 JVM 内存设上界</span>
+        .expireAfterWrite(expireAfterWriteSeconds, TimeUnit.SECONDS) <span class="c">// 默认 60 秒：限制陈旧窗口</span>
+        .build();
+
+public Shop get(Long shopId) {
+    return !enabled || shopId == null ? null : cache.getIfPresent(shopId);
+}</pre>
+      <p><code>maximumSize(10000)</code> 是防止“缓存越多越好”的误区：本地缓存占用 JVM 堆，必须有容量上限，避免挤压业务对象、引发频繁 GC。<code>expireAfterWrite(60s)</code> 让 L1 不会无限期保留旧值；它是兜底，主动失效才是更新后的主要收敛手段。</p>
+      <h3>3.4 为什么 Caffeine 放在 Bloom Filter 前面？</h3>
+      <p>Bloom Filter 的职责是快速判定<strong>可能不存在</strong>的 ID；Caffeine 的职责是最快返回<strong>已经验证过且最热</strong>的商户。对于 L1 命中的真实热点，先查 Caffeine 能连一次 Bloom/Redis 操作都免去。L1 未命中才把请求交给 Bloom 去筛非法 ID，顺序是性能与职责的共同结果。</p>
+      <h3>3.5 它不是免费午餐：什么时候不该加？</h3>
+      <div class="grid">
+        <div class="card"><h3>适合加入 Caffeine</h3><ul><li>读多写少，热点明显；</li><li>对象体积可控，能为 JVM 设置容量上限；</li><li>允许几十秒以内的最终一致，或已有可靠失效通知；</li><li>Redis 已是共享缓存，但希望降低其热点 QPS。</li></ul></div>
+        <div class="card"><h3>要谨慎或不用</h3><ul><li>要求强一致，任何旧读都不可接受；</li><li>数据对象很大，复制到每个 JVM 成本过高；</li><li>访问极度随机，L1 命中率很低；</li><li>没有失效方案，却存在频繁更新。</li></ul></div>
+      </div>
+      <div class="callout good"><strong>一句话总结：</strong>Redis 解决“多实例共享缓存”，Caffeine 解决“同一实例的极热读”。Caffeine 的核心收益不是替代 Redis，而是用可控的 JVM 内存换取更低的热点读延迟与更低的 Redis QPS；代价是缓存副本和最终一致性治理。</div>
+    </section>
+
+    <section id="code">
+      <h2>4. 总入口：按真实代码走一遍</h2>
+      <p>控制器/Service 最终将查询交给 <code>ShopCacheServiceImpl.queryById(id, this::getById)</code>。传入的 <code>this::getById</code> 就是最后的 MySQL 回源函数。</p>
+      <pre><span class="c">// ShopServiceImpl.java</span>
+@CacheConsistencyLock(name = <span class="s">"shop"</span>, key = <span class="s">"#p0"</span>, mode = CacheLockMode.READ)
+public Result queryById(Long id) {
+    Shop shop = shopCacheService.queryById(id, this::getById);
+    if (shop == null) {
+        return Result.fail(<span class="s">"店铺不存在！"</span>);
+    }
+    return Result.ok(shop);
+}</pre>
+      <pre><span class="c">// ShopCacheServiceImpl.java：主干，删去异常处理后的阅读版</span>
+Shop localHit = localCache.get(shopId);
+if (localHit != null) return localHit;                  <span class="c">// ① L1</span>
+
+if (!bloomFilter.mightContain(shopId)) return null;     <span class="c">// ② 不存在则快速拒绝</span>
+
+CacheLookup firstLookup = readRedis(shopId);            <span class="c">// ③ L2</span>
+if (firstLookup.shop != null) {
+    localCache.put(shopId, firstLookup.shop);
+    return firstLookup.shop;
+}
+if (firstLookup.nullMarker) return null;                <span class="c">// ④ 缓存过的空值</span>
+
+RLock lock = redissonClient.getLock(LOCK_SHOP_KEY + shopId);
+locked = lock.tryLock(rebuildWaitMillis, rebuildLeaseMillis, TimeUnit.MILLISECONDS);
+if (!locked) return readLastChance(shopId);             <span class="c">// ⑤ 未抢到锁不直接查库</span>
+
+<span class="c">// ⑥ 拿锁后再次检查 L1 + Redis；确认仍未命中才回源</span>
+Shop shop = databaseFallback.apply(shopId);
+if (shop == null) { cacheNull(shopId); return null; }
+cacheShop(shopId, shop);                                <span class="c">// 写 L2，再写 L1</span></pre>
+      <div class="callout"><strong>记忆口诀：</strong>本地快读 → Bloom 拦截假 ID → Redis 共享读 → 锁住重建 → MySQL 兜底。锁不是每个请求都拿，只出现在两级缓存都未命中时。</div>
+    </section>
+
+    <section id="bloom">
+      <h2>5. Bloom Filter：解决缓存穿透，但它不能证明“存在”</h2>
+      <h3>4.1 要解决什么</h3>
+      <p>攻击者或错误客户端持续请求不存在的 <code>shopId</code>。这种请求不会命中正常缓存，最后会不断回源 DB，这就是<strong>缓存穿透</strong>。空值缓存可以缓解重复 ID；Bloom Filter 则能在大量随机、分散的非法 ID 到达 Redis 之前先拦下它们。</p>
+      <table><thead><tr><th>Bloom 返回</th><th>含义</th><th>本项目动作</th></tr></thead><tbody>
+        <tr><td><strong>false</strong></td><td>该 ID 一定不在已加入集合中。</td><td>直接返回不存在，不查 Redis/MySQL。</td></tr>
+        <tr><td><strong>true</strong></td><td>该 ID <em>可能</em>存在（会有误判）。</td><td>继续查 Redis，必要时回源 MySQL；绝不据此直接认定存在。</td></tr>
+      </tbody></table>
+      <pre><span class="c">// ShopBloomFilter.java：真实实现使用 Redisson 的 Redis-backed RBloomFilter</span>
+public boolean mightContain(Long shopId) {
+    if (shopId == null) return false;
+    if (!ready) return true;              <span class="c">// 初始化未完成：fail open，继续正常查询</span>
+    try {
+        return bloomFilter.contains(shopId);
+    } catch (RuntimeException e) {
+        ready = false;
+        return true;                      <span class="c">// Bloom 故障：宁可多查，不能误杀真商户</span>
+    }
+}</pre>
+      <h3>4.2 数据从哪里来，新增店铺怎么办？</h3>
+      <pre><span class="c">// ShopBloomFilterInitializer.java：应用启动时从 DB 装载全部合法 ID</span>
+List&lt;Long&gt; shopIds = shops.stream()
+        .map(Shop::getId).filter(Objects::nonNull).collect(Collectors.toList());
+shopBloomFilter.initialize(shopIds);
+
+<span class="c">// ShopServiceImpl.saveShop()：新增成功后补入 Filter</span>
+shopBloomFilter.put(shop.getId());</pre>
+      <p>配置的预估容量为 <code>100000</code>，允许误判率为 <code>0.01</code>。容量和误判率不是“越小越好”：更低误判率需要更多位图内存；插入量明显超过预估时误判率会变差。</p>
+      <div class="callout danger"><strong>常见误区：</strong>Bloom Filter 没有删除语义，且只能判断“不存在一定准确、存在可能误判”。它不能替代数据库、Redis 或空值缓存。</div>
+    </section>
+
+    <section id="redis">
+      <h2>6. Redis：共享缓存与空值缓存如何配合</h2>
+      <pre><span class="c">// ShopCacheServiceImpl.readRedis()</span>
+String json = stringRedisTemplate.opsForValue().get(CACHE_SHOP_KEY + shopId);
+if (StrUtil.isNotBlank(json)) {
+    return CacheLookup.hit(JSONUtil.toBean(json, Shop.class));
+}
+return json == null ? CacheLookup.miss() : CacheLookup.nullMarker();
+
+<span class="c">// 正常商户：默认 30 分钟</span>
+stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + shopId,
+        JSONUtil.toJsonStr(shop), redisTtlMinutes, TimeUnit.MINUTES);
+
+<span class="c">// 不存在的商户：用空字符串作标记，默认 120 秒 + 0~30 秒抖动</span>
+stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + shopId, <span class="s">""</span>,
+        nullTtlSeconds + jitterSeconds, TimeUnit.SECONDS);</pre>
+      <h3>三个返回状态必须分清</h3>
+      <table><thead><tr><th>Redis 的值</th><th>业务解释</th><th>后续动作</th></tr></thead><tbody>
+        <tr><td>非空 JSON</td><td>缓存命中</td><td>反序列化、回填 L1、返回。</td></tr>
+        <tr><td>空字符串 <code>""</code></td><td>此前已确认 DB 没有该商户</td><td>返回不存在，不回源。</td></tr>
+        <tr><td><code>null</code></td><td>真正缓存未命中</td><td>进入 Redisson 重建流程。</td></tr>
+      </tbody></table>
+      <div class="callout good"><strong>空值缓存 + Bloom 是互补的：</strong>Bloom 更适合挡住海量随机非法 ID；空值缓存更适合挡住“同一个不存在 ID 被重复访问”，也能覆盖 Bloom 误判后的一次真实回源结果。</div>
+    </section>
+
+    <section id="redisson">
+      <h2>7. 为什么使用 Redisson：它治理的是缓存击穿</h2>
+      <h3>6.1 先区分：缓存击穿不是缓存穿透</h3>
+      <div class="grid">
+        <div class="card"><h3>穿透</h3><p>请求一个从未存在的 ID。问题是“非法数据一直回源”。解决：Bloom + 空值缓存。</p></div>
+        <div class="card"><h3>击穿</h3><p>一个真实的热点 Key 恰好失效，大量并发同时发现 Redis miss。问题是“合法热点同时回源”。解决：互斥重建锁。</p></div>
+      </div>
+      <h3>6.2 为什么不是 <code>synchronized</code>？</h3>
+      <p><code>synchronized</code> 只在单个 JVM 生效。部署两个应用实例时，两个 JVM 可以各自获得自己的本地锁，仍可能同时回源 MySQL。这里要的是<strong>跨实例</strong>的互斥，锁必须放在共享的 Redis 上。</p>
+      <pre><span class="c">// ShopCacheServiceImpl.java：仅在 L1、L2 都 miss 时才尝试分布式锁</span>
+RLock lock = redissonClient.getLock(LOCK_SHOP_KEY + shopId);
+boolean locked = lock.tryLock(rebuildWaitMillis, rebuildLeaseMillis,
+        TimeUnit.MILLISECONDS);
+if (!locked) {
+    return readLastChance(shopId); <span class="c">// 再读缓存，不让失败者去查库</span>
+}
+try {
+    <span class="c">// DCL: 获取锁后重新检查 L1 和 L2</span>
+    Shop secondLocalHit = localCache.get(shopId);
+    if (secondLocalHit != null) return secondLocalHit;
+    CacheLookup secondLookup = readRedis(shopId);
+    if (secondLookup.shop != null) return secondLookup.shop;
+    return databaseFallback.apply(shopId); <span class="c">// 只有胜者可以回源</span>
+} finally {
+    if (locked && lock.isHeldByCurrentThread()) lock.unlock();
+}</pre>
+      <h3>6.3 Redisson 带来的效果</h3>
+      <ol>
+        <li><strong>跨实例互斥：</strong>同一 <code>shopId</code> 的缓存重建只有一个赢家，其他实例不同时查 DB。</li>
+        <li><strong>失败者再读：</strong>未拿到锁的线程执行 <code>readLastChance()</code>，等待/读取已经被赢家回填的缓存，而不是退化为“人人查库”。</li>
+        <li><strong>双重检查：</strong>排队拿锁期间，其他实例可能已完成重建；拿锁后再次检查可避免无意义回源。</li>
+        <li><strong>有界等待：</strong>默认等待 3 秒、锁租约 10 秒；避免无期限阻塞。等待结束仍没有缓存则抛异常，而不是用大量 DB 回源掩盖故障。</li>
+      </ol>
+      <div class="callout warn"><strong>注意：</strong>代码显式传了 <code>leaseMillis=10000</code>。这意味着锁最多持有 10 秒；应确保 DB 回源和缓存回填在这个时间预算内。若回源可能超过租约，需要评估看门狗/续期策略或更合理的超时配置。</div>
+      <h3>6.4 这里还有第二类 Redisson 锁</h3>
+      <p>查询方法上的 <code>@CacheConsistencyLock(... READ)</code> 与更新方法上的 <code>WRITE</code> 使用 Redisson 读写锁，目的是在更新店铺与读取/重建缓存之间建立顺序约束；而 <code>queryById</code> 内的 <code>RLock</code> 专门用于<strong>缓存未命中的重建互斥</strong>。两者不要混为一谈。</p>
+    </section>
+
+    <section id="invalidation">
+      <h2>8. 更新后 L1 如何失效：Outbox + Kafka 的完整链路</h2>
+      <p class="lead">是的，本项目采用的是经典的 <strong>本地事务 + Transactional Outbox + 定时 Relay + Kafka 手动 ACK</strong> 模式。但要严谨地说，它实现的是<strong>至少一次投递/处理</strong>，并依赖“删除缓存是幂等操作”来容忍重复；没有任何分布式系统能承诺消息“绝对一定发送且一定只消费一次”。</p>
+      <div class="flow"><span class="node">更新 MySQL 商户</span><span class="arrow">→ 同一事务</span><span class="node">写 Outbox: PENDING</span><span class="arrow">→ 提交后快删本机/L2</span><span class="node">每 200ms Relay</span><span class="arrow">→</span><span class="node">Kafka</span><span class="arrow">→ 每 JVM 独立消费组</span><span class="node">删本机 L1 + Redis L2</span><span class="arrow">→ 手动 ACK</span></div>
+
+      <h3>8.1 第一步：业务更新与 Outbox 写入处于同一 MySQL 事务</h3>
+      <pre><span class="c">// ShopServiceImpl.update()：方法本身带 @Transactional</span>
+@Transactional(rollbackFor = Exception.class)
+public Result update(Shop shop) {
+    ...
+    if (!updateById(shop)) return Result.fail(<span class="s">"店铺更新失败"</span>);
+    shopCacheInvalidationPublisher.publish(id);
+    return Result.ok();
+}
+
+<span class="c">// ShopCacheInvalidationPublisher.publish()</span>
+ShopCacheInvalidationOutboxEvent outboxEvent =
+        ShopCacheInvalidationOutboxEvent.pending(shopId, reason);
+if (outboxMapper.insert(outboxEvent) != 1) {
+    throw new IllegalStateException(<span class="s">"Failed to persist ... outbox event"</span>);
+}</pre>
+      <p>这里没有在业务事务内直接调用 Kafka。商户更新和 <code>tb_shop_cache_invalidation_outbox</code> 的插入走的是同一个 MySQL 事务：</p>
+      <table><thead><tr><th>故障时刻</th><th>事务结果</th><th>是否会遗失失效事件</th></tr></thead><tbody>
+        <tr><td>更新商户失败/事务回滚</td><td>商户更新与 Outbox 插入一起回滚</td><td>不会：没有产生需要失效的新数据。</td></tr>
+        <tr><td>商户更新成功，但写 Outbox 失败</td><td><code>publish()</code> 抛异常，外层事务回滚</td><td>不会：不会出现“数据已变、却没有失效事件”。</td></tr>
+        <tr><td>事务已提交，但应用在发 Kafka 前宕机</td><td>数据库已有 <code>PENDING</code> 事件</td><td>不会：恢复后 Relay 会继续扫描。</td></tr>
+      </tbody></table>
+      <pre><span class="c">// Outbox 表的关键字段（V2 migration）</span>
+event_id        <span class="c">// UUID，唯一事件标识</span>
+shop_id         <span class="c">// 要清理哪个商户</span>
+reason          <span class="c">// 默认 "shop-changed"</span>
+status          <span class="c">// PENDING / SENT / FAILED</span>
+retry_count, next_retry_time, last_error
+created_time, sent_time
+
+<span class="c">// 创建 PENDING 事件的真实代码</span>
+return new ShopCacheInvalidationOutboxEvent()
+    .setEventId(UUID.randomUUID().toString())
+    .setShopId(shopId).setReason(reason == null ? <span class="s">"shop-changed"</span> : reason)
+    .setStatus(STATUS_PENDING).setRetryCount(0).setNextRetryTime(now);</pre>
+
+      <h3>8.2 当前实例的“快路径”：提交后立即删 L1 与 L2</h3>
+      <pre><span class="c">// publish()：只能在事务真正提交后做快删，不能在提交前删</span>
+TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+    @Override
+    public void afterCommit() {
+        invalidationHandler.evictBestEffort(shopId);
+    }
+});
+
+<span class="c">// ShopCacheInvalidationHandler.evict()</span>
+shopLocalCache.invalidate(shopId);                 <span class="c">// 当前 JVM 的 Caffeine L1</span>
+stringRedisTemplate.delete(CACHE_SHOP_KEY + shopId); <span class="c">// Redis L2</span></pre>
+      <p>这是低延迟优化，不是可靠性的唯一依靠。即使这里 Redis 删除失败或应用刚提交就崩溃，Outbox 中的事件仍在，后续 Kafka 广播会重试清理。之所以放在 <code>afterCommit()</code>，是为了避免数据库最终回滚、缓存却被提前删掉。</p>
+
+      <h3>8.3 Relay：扫描 PENDING，确认 Kafka 接收后才标记 SENT</h3>
+      <pre><span class="c">// ShopCacheInvalidationOutboxRelay：默认每 200ms 执行</span>
+@Scheduled(fixedDelayString = <span class="s">"${hmdp.kafka.shop-cache.outbox.poll-delay-ms:200}"</span>)
+public void relayPending() {
+    RLock relayLock = redissonClient.getLock(LOCK_SHOP_CACHE_OUTBOX_RELAY);
+    if (!relayLock.tryLock()) return;        <span class="c">// 多实例只有一台 Relay 扫描</span>
+    List&lt;ShopCacheInvalidationOutboxEvent&gt; events = outboxMapper.findDispatchable(batchSize);
+    for (ShopCacheInvalidationOutboxEvent event : events) dispatch(event);
+}
+
+<span class="c">// SQL 只选到期的 PENDING 事件</span>
+SELECT ... FROM tb_shop_cache_invalidation_outbox
+WHERE status = 'PENDING' AND next_retry_time &lt;= NOW()
+ORDER BY id ASC LIMIT #{limit};</pre>
+      <p>消息对象是普通 JSON，对应类 <code>ShopCacheInvalidationMessage</code>：</p>
+      <pre>{
+  <span class="s">"eventId"</span>: <span class="s">"550e8400-e29b-41d4-a716-446655440000"</span>,
+  <span class="s">"shopId"</span>: <span class="n">12</span>,
+  <span class="s">"reason"</span>: <span class="s">"shop-changed"</span>,
+  <span class="s">"occurredAtEpochMillis"</span>: <span class="n">1761019200000</span>
+}</pre>
+      <pre><span class="c">// 发送时以 shopId 作为 Kafka record key</span>
+return kafkaTemplate.send(topic, String.valueOf(message.getShopId()), message);
+
+<span class="c">// Relay 等待 broker 确认；确认后才把本地事件改为 SENT</span>
+kafkaProducer.send(message).get(sendTimeoutSeconds, TimeUnit.SECONDS);
+outboxMapper.markSent(event.getId());</pre>
+      <p>使用 <code>shopId</code> 作为 key，使同一商户的多次失效事件路由到同一分区，保持分区内顺序。生产者配置了 <code>acks=all</code> 和 <code>enable.idempotence=true</code>：前者要求 ISR 副本确认，后者避免生产端重试把同一发送重复写入 Kafka。</p>
+      <div class="callout warn"><strong>仍可能重复，且这是预期设计：</strong>若 Kafka 已确认消息，但应用在 <code>markSent()</code> 前宕机，Outbox 仍是 <code>PENDING</code>，恢复后会再次发送。此处不能把它称为“恰好一次”；但 <code>delete cache:shop:{id}</code> 重复执行没有副作用，所以重复安全。</div>
+      <p>发送异常会按指数退避更新 <code>next_retry_time</code>，默认最多自动尝试 12 次；超过上限会标为 <code>FAILED</code> 停入人工处理区。因此准确说是“持久化重试并可观测地升级失败”，不是凭空保证永不失败。</p>
+
+      <h3>8.4 消费者：每个应用实例都必须收到同一条失效事件</h3>
+      <p>普通 Kafka 同一消费组会把一条消息分摊给组内某一个消费者，这不适合 L1 缓存失效：我们要让<strong>每一个 JVM</strong>都删除自己的 Caffeine。项目为每个 JVM 生成独立消费组：</p>
+      <pre><span class="c"># application.yaml</span>
+hmdp:
+  kafka:
+    shop-cache:
+      consumer-group: ${spring.application.name}-shop-cache-${random.uuid}
+      <span class="c"># 每个 JVM 的 groupId 不同，故每个 JVM 都会消费同一 Topic</span>
+
+<span class="c"># 关闭自动提交，手动即时确认</span>
+spring.kafka.consumer.enable-auto-commit: false
+spring.kafka.listener.ack-mode: manual_immediate</pre>
+      <pre><span class="c">// ShopCacheInvalidationKafkaConsumer：真实消费代码</span>
+@KafkaListener(topics = <span class="s">"${hmdp.kafka.shop-cache.topic}"</span>,
+               groupId = <span class="s">"${hmdp.kafka.shop-cache.consumer-group}"</span>,
+               containerFactory = <span class="s">"shopCacheKafkaListenerContainerFactory"</span>)
+public void onMessage(ShopCacheInvalidationMessage message, Acknowledgment acknowledgment) {
+    if (message == null || message.getShopId() == null || message.getEventId() == null) {
+        throw new IllegalArgumentException(<span class="s">"Invalid shop cache invalidation message"</span>);
+    }
+    consumerHandler.evict(message.getShopId()); <span class="c">// 成功清理后才 ACK</span>
+    acknowledgment.acknowledge();
+}</pre>
+      <pre><span class="c">// consumerHandler.evict()：清理时拿与更新/查询同一把 per-shop 写锁</span>
+@CacheConsistencyLock(name = <span class="s">"shop"</span>, key = <span class="s">"#p0"</span>, mode = CacheLockMode.WRITE)
+public void evict(Long shopId) {
+    invalidationHandler.evict(shopId); <span class="c">// Caffeine.invalidate + Redis.delete</span>
+}</pre>
+      <p>如果清理成功：执行 ACK，Kafka 才提交当前 offset。如果 Redis 删除或加锁失败：方法抛异常，不 ACK，框架会按配置重试 3 次、每次间隔 1 秒；仍失败后同步投递 DLT，DLT 成功后才提交“已恢复”的 offset。删除是幂等的，因此重复投递、重复消费都安全。</p>
+      <div class="callout good"><strong>这条链路的承诺：</strong>只要 Outbox 记录仍为 <code>PENDING</code>，Relay 就会持续尝试把事件送到 Kafka；每个 JVM 只在本机 L1/L2 清理完成后才 ACK。依托持久化 Outbox、Kafka 副本确认、重试/DLT，以及幂等删除，获得“最终每实例缓存失效”的至少一次语义。</div>
+    </section>
+
+    <section id="consistency">
+      <h2>9. 双重缓存最容易遗漏：更新后 L1 怎么失效？</h2>
+      <p>如果只删本机 Caffeine，其他实例仍可能继续返回旧数据。因此项目更新店铺后发布失效事件；每个 JVM 使用独立 Kafka 消费组来消费同一条消息，并清掉自己的本地缓存。</p>
+      <pre><span class="c">// ShopServiceImpl.update()</span>
+if (!updateById(shop)) return Result.fail(<span class="s">"店铺更新失败"</span>);
+shopCacheInvalidationPublisher.publish(id);
+
+<span class="c">// ShopCacheInvalidationKafkaConsumer.onMessage()</span>
+consumerHandler.evict(message.getShopId());
+acknowledgment.acknowledge();</pre>
+      <p>这是一种<strong>最终一致性</strong>设计：失效消息到达前，少量请求可能读到旧 L1；但 L1 自身 60 秒过期，并且 Kafka 失效通知会主动缩短陈旧窗口。对于商户详情这类读多写少、允许短暂陈旧的场景，这个取舍通常合理。</p>
+    </section>
+
+    <section id="interview">
+      <h2>10. 最终复述：面试时如何讲这条链路</h2>
+      <div class="callout good"><p><strong>60 秒版本：</strong>商户详情是高频读接口，我使用 Caffeine 和 Redis 两级缓存。加 Caffeine 的原因是 Redis 对应用仍是远程调用，热点读每次都要经历网络和编解码；而 Caffeine 在 JVM 内直接命中，可以降低热点请求延迟和 Redis QPS。Redis 则负责跨实例共享。L1 未命中后，先用 Redis-backed Bloom Filter 拦截确定不存在的 ID，再查 Redis。Redis 中对不存在的商户保存短 TTL 的空字符串，避免同一个非法 ID 重复穿透。两层缓存都未命中时，用 Redisson 分布式锁保证多个实例里只有一个线程回源 MySQL 并重建缓存；没拿到锁的线程只会再次读缓存，不会一起打数据库。重建完成后同时回填 Redis 与本地缓存。店铺更新则通过失效事件通知各实例清理 L1，以最终一致性换取读性能。</p></div>
+      <h3>高频追问自测</h3>
+      <p class="q">Q：为什么 Bloom 在 Redis 后面？</p><p>这里的 Bloom 在 Redis 前面。它对“确定不存在”的 ID 直接短路，减少 Redis/DB 无效访问；但它有误判，返回“可能存在”仍必须去 Redis/DB 验证。</p>
+      <p class="q">Q：有 Bloom 了为什么还要空值缓存？</p><p>Bloom 会误判，且新增/初始化窗口中必须 fail-open；空值缓存能把实际回源后确认不存在的热点非法 ID 缓住，两者覆盖不同路径。</p>
+      <p class="q">Q：为什么 Redisson 锁后还要二次查缓存？</p><p>等待锁的时间内，另一个实例可能已重建完成。二次检查能避免“拿到了锁就必查 DB”的无效回源，这就是双重检查。</p>
+      <p class="q">Q：Redis 挂了怎么办？</p><p>这份查询实现的正常路径依赖 Redis 与 Redisson；Bloom 组件本身采用 fail-open，不会误拒绝真数据，但 Redis 读/锁不可用时会抛出异常。生产上应结合 Redis Sentinel、熔断降级或受控的 DB fallback，并评估 DB 承载能力；不能无条件放开所有请求回源。</p>
+    </section>
+    <footer>代码依据：当前工作区 <code>ShopCacheServiceImpl</code>、<code>ShopLocalCache</code>、<code>ShopBloomFilter</code>、<code>ShopServiceImpl</code>、<code>application.yaml</code>。文档生成于 2026-10-21。</footer>
+  </main>
+</body>
+</html>

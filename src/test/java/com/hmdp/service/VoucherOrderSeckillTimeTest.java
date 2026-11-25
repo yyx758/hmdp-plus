@@ -15,6 +15,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.data.redis.core.HashOperations;
@@ -97,7 +98,7 @@ class VoucherOrderSeckillTimeTest {
     }
 
     @Test
-    void returnsUserFacingSuccessWithoutWaitingForOutboxAfterLuaSucceeds() {
+    void returnsProcessingWithoutWaitingForOutboxAfterLuaSucceeds() {
         mockLuaResult(0L);
 
         Result result = service.seckillVoucher(2L, "access-token");
@@ -105,8 +106,8 @@ class VoucherOrderSeckillTimeTest {
         assertTrue(result.getSuccess());
         SeckillOrderStatusDTO status = (SeckillOrderStatusDTO) result.getData();
         assertEquals(1001L, status.getOrderId());
-        assertEquals("SUCCESS", status.getStatus());
-        assertEquals("抢券成功", status.getMessage());
+        assertEquals("PROCESSING", status.getStatus());
+        assertEquals("资格已锁定，订单处理中", status.getMessage());
         Mockito.verifyNoInteractions(outboxService);
     }
 
@@ -135,8 +136,18 @@ class VoucherOrderSeckillTimeTest {
         assertFalse(result.getSuccess());
         SeckillOrderStatusDTO status = (SeckillOrderStatusDTO) result.getData();
         assertEquals(1001L, status.getOrderId());
-        assertEquals("PROCESSING", status.getStatus());
+        assertEquals("UNKNOWN", status.getStatus());
         Mockito.verifyNoInteractions(outboxService);
+    }
+
+    @Test
+    void missingLuaReplyIsUnconfirmedRatherThanRejected() {
+        Result result = service.seckillVoucher(2L, "access-token");
+
+        assertFalse(result.getSuccess());
+        SeckillOrderStatusDTO status = (SeckillOrderStatusDTO) result.getData();
+        assertEquals(1001L, status.getOrderId());
+        assertEquals("UNKNOWN", status.getStatus());
     }
 
     @Test
@@ -186,6 +197,70 @@ class VoucherOrderSeckillTimeTest {
                 .thenReturn("8|2");
 
         assertFalse(service.querySeckillOrderStatus(1001L).getSuccess());
+    }
+
+    @Test
+    void mysqlFailureUsesRetainedAcceptanceReceipt() {
+        Mockito.when(voucherOrderMapper.selectById(1001L))
+                .thenThrow(new DataAccessResourceFailureException("mysql down"));
+        Mockito.when(hashOperations.get("seckill:order:accepted", "1001"))
+                .thenReturn("7|2|123456789|PROCESSING");
+
+        Result result = service.querySeckillOrderStatus(1001L);
+
+        assertTrue(result.getSuccess());
+        assertEquals("PROCESSING", ((SeckillOrderStatusDTO) result.getData()).getStatus());
+    }
+
+    @Test
+    void mysqlFailureUsesCommittedTerminalReceipt() {
+        Mockito.when(voucherOrderMapper.selectById(1001L))
+                .thenThrow(new DataAccessResourceFailureException("mysql down"));
+        Mockito.when(hashOperations.get("seckill:order:accepted", "1001"))
+                .thenReturn("7|2|123456789|SUCCESS");
+
+        Result result = service.querySeckillOrderStatus(1001L);
+
+        assertTrue(result.getSuccess());
+        assertEquals("SUCCESS", ((SeckillOrderStatusDTO) result.getData()).getStatus());
+    }
+
+    @Test
+    void bothStoresUnavailableReturnsUnknown() {
+        Mockito.when(voucherOrderMapper.selectById(1001L))
+                .thenThrow(new DataAccessResourceFailureException("mysql down"));
+        Mockito.when(hashOperations.get("seckill:order:accepted", "1001"))
+                .thenThrow(new RedisConnectionFailureException("redis down"));
+
+        Result result = service.querySeckillOrderStatus(1001L);
+
+        assertTrue(result.getSuccess());
+        assertEquals("UNKNOWN", ((SeckillOrderStatusDTO) result.getData()).getStatus());
+    }
+
+    @Test
+    void activeOrderLookupFallsBackToAcceptanceIndex() {
+        Mockito.when(hashOperations.get("seckill:order:accepted:user:2", "7"))
+                .thenReturn("1001");
+
+        Result result = service.queryActiveOrderId(2L);
+
+        assertTrue(result.getSuccess());
+        assertEquals("1001", result.getData());
+    }
+
+    @Test
+    void staleAcceptanceIndexDoesNotResurrectCancelledOrder() {
+        Mockito.when(hashOperations.get("seckill:order:accepted:user:2", "7"))
+                .thenReturn("1001");
+        Mockito.when(voucherOrderMapper.selectById(1001L)).thenReturn(
+                new VoucherOrder().setId(1001L).setUserId(7L)
+                        .setVoucherId(2L).setStatus(4));
+
+        Result result = service.queryActiveOrderId(2L);
+
+        assertTrue(result.getSuccess());
+        assertEquals(null, result.getData());
     }
 
     @SuppressWarnings("unchecked")
